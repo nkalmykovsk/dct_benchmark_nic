@@ -73,7 +73,7 @@ def select_gpu(gpu_order, memory_threshold=8000, temp_threshold=70):
 def get_device():
     print("CUDA available:", torch.cuda.is_available())
     if torch.cuda.is_available():
-        gpu_priority_order = [0, 1, 2, 3]
+        gpu_priority_order = [1, 2, 3]
         selected_gpu = select_gpu(gpu_order=gpu_priority_order, memory_threshold=14000, temp_threshold=70)
         
         if selected_gpu is not None:
@@ -1124,17 +1124,20 @@ def evaluate_frequency_response2(
     cum_energy_avg = {w_key: np.mean(np.stack(arrs, axis=0), axis=0)
                       for w_key, arrs in cum_energy_accumulator.items()}
 
+    # Build metrics dictionary: provide per-k arrays for plotting, plus compact summary for CSVs
+    indices_arr = np.arange(size)
     avg_metrics = {
-        "R": R_mean,
-        "leakage": leakage_avg,
+        "num_runs": int(max(1, num_runs)),
+        # Per-k arrays for visualization
+        "indices": indices_arr,
+        # Linear leakage per k as defined L_k = 1 - R[k,k]
+        "leakage": 1.0 - np.diag(R_mean),
         "odr": odr_avg,
-        "centroids": centroids_avg,
         "centroid_shift": centroid_shift_avg,
         "spread": spread_avg,
         "entropy": entropy_avg,
         "cum_energy": cum_energy_avg,
-        "indices": np.arange(size),
-        "num_runs": int(max(1, num_runs)),
+        "R": R_mean,
     }
 
     # Aggregate scalars for table reporting (concise summary)
@@ -1152,22 +1155,6 @@ def evaluate_frequency_response2(
     except Exception:
         summary = None
     avg_metrics["summary"] = summary
-
-    # Band-wise normalized summaries for concise trend plots
-    try:
-        band_summary = compute_band_summaries(
-            R_mean,
-            odr_avg,
-            centroid_shift_avg,
-            spread_avg,
-            entropy_avg,
-            cum_energy_avg,
-            ce_window=summary_window,
-            normalize=True,
-        )
-    except Exception:
-        band_summary = None
-    avg_metrics["band_summary"] = band_summary
 
     # 6. Visualization
     if show_plots:
