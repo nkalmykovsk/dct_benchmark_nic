@@ -818,7 +818,7 @@ def evaluate_frequency_response(model, device, size=64):
     return diag_mse, band_errors
 
 
-def compute_dct_smearing_metrics(D_hat, axis=0, normalize_freq=True, show_plots=True, title_prefix=""):
+def compute_dct_smearing_metrics(D_hat, axis=0, normalize_freq=True, show_plots=True, title_prefix="", save_path=None):
     """
     D_hat: (N,N) numpy array — the decompressed DCT matrix image.
            (If you have RGB, convert to gray or take one channel.)
@@ -857,22 +857,39 @@ def compute_dct_smearing_metrics(D_hat, axis=0, normalize_freq=True, show_plots=
     # Metrics per basis k
     indices = np.arange(N)
     centroids = (R.T @ indices)  # shape (N,), centroid in index units
+    # Absolute centroid shift Δ_k = μ_k - k
+    centroid_shift = centroids - indices
+
     if normalize_freq:
-        centroids_norm = centroids / (N - 1)  # normalized to [0,1]
+        # Normalize centroid positions to [0,1]
+        centroids_norm = centroids / (N - 1)
+        # Normalize shift by maximum possible shift for that k
+        max_shift = np.maximum(indices, (N - 1) - indices)
+        centroid_shift_norm = centroid_shift / (max_shift + 1e-12)
     else:
         centroids_norm = centroids
+        centroid_shift_norm = centroid_shift
 
-    # true frequency indices are k
-    leakage = -10*np.log10(1.0 - np.diag(R)+1e-6)   # 1 - p_k
-    odr = (np.sum(R, axis=0) - np.diag(R)) / (np.diag(R) + 1e-12)
+    # Linear leakage (1 - p_k)
+    leakage = (1.0 - np.diag(R))
+
+    # Stable ODR with tanh squashing
+    eps = 1e-12
+    diag_vals = np.diag(R)
+    odr = (np.sum(R, axis=0) - diag_vals) / (diag_vals + eps)
+    odr = np.tanh(0.5 * odr)
 
     # variance (spread)
     variance = np.array([np.sum(((indices - centroids[k])**2) * R[:, k]) for k in range(N)])
     spread = np.sqrt(variance)
+    # Normalize spread by max possible spread from centroid
+    max_spread_per_k = np.maximum(np.abs(0 - centroids), np.abs((N - 1) - centroids))
+    spread = spread / (max_spread_per_k + 1e-12)
 
-    # entropy
-    eps = 1e-12
+    # entropy normalized to [0,1]
+    n = R.shape[0]
     entropy = -np.sum(R * np.log(R + eps), axis=0)
+    entropy = entropy / np.log(n)
 
     # cumulative energy within windows
     def cumulative_energy(k, w):
@@ -889,7 +906,7 @@ def compute_dct_smearing_metrics(D_hat, axis=0, normalize_freq=True, show_plots=
         'leakage': leakage,
         'odr': odr,
         'centroids': centroids_norm,
-        'centroid_shift': centroids - np.arange(N),
+        'centroid_shift': centroid_shift_norm,
         'spread': spread,
         'entropy': entropy,
         'cum_energy': cum_energy,
@@ -897,44 +914,48 @@ def compute_dct_smearing_metrics(D_hat, axis=0, normalize_freq=True, show_plots=
     }
 
     if show_plots:
-        plt.figure(figsize=(14, 10))
+        fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
         # heatmap R
-        plt.subplot(2,2,1)
-        plt.imshow(R, aspect='auto', origin='lower', cmap='viridis')
-        plt.colorbar(label='Normalized power')
-        plt.xlabel('input basis k')
-        plt.ylabel('observed frequency i')
-        plt.title(f'{title_prefix} Frequency-response matrix R (rows obs freq, cols input k)')
+        ax = axs[0, 0]
+        im = ax.imshow(R, origin='lower', cmap='viridis', interpolation='nearest')
+        ax.set_xlim(-0.5, N - 0.5)
+        ax.set_ylim(-0.5, N - 0.5)
+        ax.grid(False)
+        fig.colorbar(im, ax=ax, label='Normalized power')
+        ax.set_xlabel('input basis k')
+        ax.set_ylabel('observed frequency i')
+        ax.set_title(f'{title_prefix} Frequency-response matrix R')
 
-        # leakage, centroid shift, spread
-        plt.subplot(2,2,2)
-        plt.plot(metrics['indices'], leakage, label='Leakage (1 - p_k)')
-        plt.plot(metrics['indices'], np.abs(metrics['centroid_shift']), label='|Centroid shift| (indices)')
-        plt.plot(metrics['indices'], spread, label='Spread (sigma)')
-        plt.yscale('linear')
-        plt.xlabel('basis k (normalized freq index)')
-        plt.legend()
-        plt.title(f'{title_prefix} Leakage / shift / spread')
+        # leakage, centroid shift, spread, entropy
+        ax = axs[0, 1]
+        ax.plot(indices, leakage, label='Leakage (1 - p_k)')
+        ax.plot(indices, np.abs(centroid_shift_norm), label='|Centroid shift| (normalized)')
+        ax.plot(indices, spread, label='Spread (normalized)')
+        ax.plot(indices, entropy, label='Entropy (normalized)')
+        ax.set_xlabel('basis k (normalized freq index)')
+        ax.legend()
+        ax.set_title(f'{title_prefix} Leakage / shift / spread / Entropy')
 
-        # entropy and ODR
-        plt.subplot(2,2,3)
-        plt.plot(metrics['indices'], entropy, label='Entropy')
-        plt.plot(metrics['indices'], odr, label='ODR (offdiag / ondiag)')
-        plt.xlabel('basis k')
-        plt.legend()
-        plt.title(f'{title_prefix} Entropy & off-diag ratio')
+        # ODR only
+        ax = axs[1, 0]
+        ax.plot(indices, odr, label='ODR (tanh scaled)')
+        ax.set_xlabel('basis k')
+        ax.legend()
+        ax.set_title(f'{title_prefix} Off-diag ratio')
 
-        # cumulative energy for select windows
-        plt.subplot(2,2,4)
+        # cumulative energy
+        ax = axs[1, 1]
         for w in windows:
-            plt.plot(metrics['indices'], cum_energy[w], label=f'within +/-{w}')
-        plt.xlabel('basis k')
-        plt.ylim(-0.05, 1.05)
-        plt.legend()
-        plt.title(f'{title_prefix} Cumulative energy in neighbor windows')
+            ax.plot(indices, cum_energy[w], label=f'within +/-{w}')
+        ax.set_xlabel('basis k')
+        ax.set_ylim(-0.05, 1.05)
+        ax.legend()
+        ax.set_title(f'{title_prefix} Cumulative energy in neighbor windows')
 
-        plt.tight_layout()
+        fig.tight_layout()
+        if save_path is not None:
+            fig.savefig(save_path, dpi=300)
         plt.show()
 
     return metrics
@@ -986,7 +1007,9 @@ def compute_band_summaries(
     N = R_mean.shape[0]
     diag_R = np.diag(R_mean)
     L_linear = 1.0 - diag_R  # linear leakage per k
-    H_bits = entropy_avg / np.log(2)
+    # Recompute entropy per k in bits from R_mean to ensure consistent units
+    eps = 1e-12
+    H_bits = -np.sum(R_mean * np.log(R_mean + eps), axis=0) / np.log(2)
     if ce_window not in cum_energy_avg:
         raise ValueError(f"Requested CE window {ce_window} not present in cum_energy_avg")
     CE_w = cum_energy_avg[ce_window]
@@ -1144,12 +1167,15 @@ def evaluate_frequency_response2(
     summary_window = 2
     try:
         ce_w = cum_energy_avg.get(summary_window, None)
+        # Compute entropy in bits from R_mean to keep CSV units consistent
+        eps = 1e-12
+        entropy_bits_from_R = -np.sum(R_mean * np.log(R_mean + eps), axis=0) / np.log(2)
         summary = {
             "L_k": float(np.median(1.0 - np.diag(R_mean))),
             "ODR_k": float(np.median(odr_avg)),
             "|Delta_c_k|": float(np.median(np.abs(centroid_shift_avg))),
             "s_k": float(np.median(spread_avg)),
-            "H_k_bits": float(np.median(entropy_avg / np.log(2))),
+            "H_k_bits": float(np.median(entropy_bits_from_R)),
             f"CE_k(w={summary_window})": float(np.median(ce_w)) if ce_w is not None else None,
         }
     except Exception:
