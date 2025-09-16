@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
+from matplotlib import patheffects as pe
 import matplotlib as mpl
 
 
@@ -208,16 +209,36 @@ def fig_ex1_dct_grid_allmodels(root_dir: Path, size: int, models, pretty_names=N
     def make_caption(r):
         if r is None:
             return ("—", '')
-        f3 = lambda x: ('%.3f' % float(x)) if pd.notna(x) else '—'
-        label = {
-            'L_k': 'L',
-            'ODR_k': 'ODR',
-            '|Delta_c_k|': '|Δc|',
-            's_k': 's',
-            'H_k_bits': 'H',
-            'CE_k(w=2)': 'CE2',
-        }.get(metric_key, metric_key)
-        return (f"{label}={f3(r.get(metric_key))}", '')
+        def fmt_smart(x):
+            if x is None or (isinstance(x, float) and (np.isnan(x) or np.isinf(x))):
+                return '—'
+            try:
+                v = float(x)
+            except Exception:
+                return '—'
+            if v == 0.0:
+                return '0'
+            for dec in (3, 4, 5, 6, 7, 8, 9):
+                s = f"{v:.{dec}f}"
+                if float(s) != 0.0:
+                    return s
+            return f"{v:.9f}"
+
+        if metric_key == 'L_k':
+            l_med = fmt_smart(r.get('L_k'))
+            l_low = fmt_smart(r.get('L_low')) if 'L_low' in r else '—'
+            l_high = fmt_smart(r.get('L_high')) if 'L_high' in r else '—'
+            return (f"L={l_med}", f"(low={l_low}, high={l_high})")
+        else:
+            label = {
+                'L_k': 'L',
+                'ODR_k': 'ODR',
+                '|Delta_c_k|': '|Δc|',
+                's_k': 's',
+                'H_k_bits': 'H',
+                'CE_k(w=2)': 'CE2',
+            }.get(metric_key, metric_key)
+            return (f"{label}={fmt_smart(r.get(metric_key))}", '')
 
     for i, q in enumerate(q_list):
         img_row = 2*i
@@ -238,9 +259,11 @@ def fig_ex1_dct_grid_allmodels(root_dir: Path, size: int, models, pretty_names=N
             axc.set_axis_off()
             r = read_metrics_row(m, q)
             l1, l2 = make_caption(r)
-            axc.text(0.5, 0.95, l1, ha='center', va='top', fontsize=7)
+            axc.text(0.5, 0.95, l1, ha='center', va='top', fontsize=8,
+                     path_effects=[pe.withStroke(linewidth=2, foreground='white')])
             if l2:
-                axc.text(0.5, 0.2, l2, ha='center', va='top', fontsize=7)
+                axc.text(0.5, 0.22, l2, ha='center', va='top', fontsize=8,
+                         path_effects=[pe.withStroke(linewidth=2, foreground='white')])
         # Left label q on the first image axis to avoid extra margins
         # Locate first image axis of the row (column 0)
         first_ax = fig.add_subplot(gs[img_row, 0])
@@ -252,8 +275,8 @@ def fig_ex1_dct_grid_allmodels(root_dir: Path, size: int, models, pretty_names=N
     fig.tight_layout(rect=[0, 0, 1, 1])
     outdir = root / 'paper'
     outdir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(outdir / f'{out_base}_size{size}.png', dpi=250, bbox_inches='tight', pad_inches=0.02)
-    fig.savefig(outdir / f'{out_base}_size{size}.pdf', format='pdf', bbox_inches='tight', pad_inches=0.02)
+    fig.savefig(outdir / f'{out_base}_size{size}.png', dpi=300, bbox_inches='tight', pad_inches=0.02)
+    fig.savefig(outdir / f'{out_base}_size{size}.pdf', format='pdf', dpi=300, bbox_inches='tight', pad_inches=0.02)
     plt.close(fig)
 
 
@@ -448,6 +471,59 @@ def fig_double_bars_hq(df, models, sizes, pretty_names, out_png, out_pdf):
     axes[1].invert_yaxis()
     axes[1].grid(axis='x', alpha=0.3)
     fig.tight_layout()
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_png, dpi=250)
+    fig.savefig(out_pdf, format='pdf')
+    plt.close(fig)
+
+
+def fig_leakage_bands_at_size(df, models, size_int, out_png, out_pdf):
+    # Plot L_low, L_k (median), L_high vs q (or p) per model for a single size
+    size_str = f"{size_int}x{size_int}"
+    df_size = df[df['Size'] == size_str].copy()
+    if df_size.empty:
+        return
+    cols = len(models)
+    fig, axes = plt.subplots(1, cols, figsize=(3.0*cols, 2.6), sharey=True)
+    if cols == 1:
+        axes = np.expand_dims(axes, 0)
+    # y-range across bands for this size
+    y_candidates = []
+    for col in ['L_low', 'L_k', 'L_high']:
+        if col in df_size.columns:
+            y_candidates.append(df_size[col].dropna().values)
+    if y_candidates:
+        y_all = np.concatenate(y_candidates) if len(y_candidates) > 1 else y_candidates[0]
+        y_min, y_max = (float(np.nanmin(y_all)), float(np.nanmax(y_all)))
+    else:
+        y_min, y_max = (0.0, 1.0)
+    for c, model in enumerate(models):
+        ax = axes[c] if cols > 1 else axes[0]
+        gm = df_size[df_size['Model'] == model]
+        if gm.empty:
+            ax.set_axis_off()
+            continue
+        x_m = 'q' if 'q' in gm.columns and gm['q'].notna().any() else 'p'
+        gs = gm.sort_values(x_m)
+        x = gs[x_m].values
+        if 'L_low' in gs.columns and gs['L_low'].notna().any():
+            ax.plot(x, gs['L_low'].values, '-o', label='L_low', color='#1f77b4')
+        if 'L_k' in gs.columns and gs['L_k'].notna().any():
+            ax.plot(x, gs['L_k'].values, '-o', label='L (median)', color='#d62728')
+        if 'L_high' in gs.columns and gs['L_high'].notna().any():
+            ax.plot(x, gs['L_high'].values, '-o', label='L_high', color='#2ca02c')
+        ax.set_title(model)
+        ax.set_xlabel(x_m)
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(y_min, y_max)
+        if c == 0:
+            ax.set_ylabel('Leakage')
+    # One shared legend
+    handles, labels = axes[0].get_legend_handles_labels() if cols > 1 else axes[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc='upper center', ncol=3, bbox_to_anchor=(0.5, 1.02), fontsize=9)
+    fig.suptitle(f'Leakage bands at size {size_int}x{size_int}')
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png, dpi=250)
     fig.savefig(out_pdf, format='pdf')
@@ -773,6 +849,20 @@ def main():
         if f'{small}x{small}' in df['Size'].unique():
             models_for_small = [m for m in ex_all if m != 'tcm']
             fig_ex1_dct_grid_allmodels(root, small, models_for_small, pretty_names=pretty_map, out_base=f'ex1_dct_grid_allmodels')
+
+    # New: leakage bands (L_low, L (median), L_high) vs q at size 128 for all models present
+    try:
+        if 'L_low' in df.columns and 'L_high' in df.columns and f'128x128' in df['Size'].unique():
+            bands_models = [m for m in desired_order if m in available]
+            fig_leakage_bands_at_size(
+                df,
+                bands_models,
+                128,
+                root / 'paper/leakage_bands_size128.png',
+                root / 'paper/leakage_bands_size128.pdf',
+            )
+    except Exception:
+        pass
 
 
 if __name__ == '__main__':
