@@ -2,7 +2,11 @@
 
 import os
 import sys
+import warnings
 from io import BytesIO
+from pathlib import Path
+
+warnings.filterwarnings("ignore", message=".*IProgress not found.*")
 
 import imageio.v3 as iio
 import numpy as np
@@ -23,7 +27,9 @@ class ImageCodecModel:
     def __init__(self, codec: str, q_level: int):
         self.codec = codec.lower()
         if self.codec not in self.SUPPORTED_CODECS:
-            raise ValueError(f"Unsupported codec: {codec}. Use: {self.SUPPORTED_CODECS}")
+            raise ValueError(
+                f"Unsupported codec: {codec}. Use: {self.SUPPORTED_CODECS}"
+            )
         self.q_level = int(q_level)
 
     @staticmethod
@@ -91,7 +97,12 @@ class ImageCodecModel:
         # Try imagecodecs first
         if _ic is not None:
             try:
-                encoded = _ic.jpeg2k_encode(img_u8, psnr=target_psnr, irreversible=True, mct=1)
+                encoded = _ic.jpeg2k_encode(
+                    img_u8,
+                    psnr=target_psnr,
+                    irreversible=True,
+                    mct=1,
+                )
                 return _ic.jpeg2k_decode(encoded)
             except Exception:
                 pass
@@ -126,7 +137,7 @@ class ImageCodecModel:
             except Exception:
                 pass
 
-        # Try cjxl/djxl CLI
+        # Try cjxl/djxl
         try:
             import subprocess as sp
             import tempfile as tf
@@ -135,9 +146,18 @@ class ImageCodecModel:
                 jxl = os.path.join(td, 'out.jxl')
                 outp = os.path.join(td, 'out.png')
                 iio.imwrite(inp, img_u8, extension='.png')
-                sp.run(['cjxl', inp, jxl, f'--distance={dist}', '--effort=7'],
-                       check=True, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
-                sp.run(['djxl', jxl, outp], check=True, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+                sp.run(
+                    ['cjxl', inp, jxl, f'--distance={dist}', '--effort=7'],
+                    check=True,
+                    stdout=sp.DEVNULL,
+                    stderr=sp.DEVNULL,
+                )
+                sp.run(
+                    ['djxl', jxl, outp],
+                    check=True,
+                    stdout=sp.DEVNULL,
+                    stderr=sp.DEVNULL,
+                )
                 return iio.imread(outp)
         except Exception:
             pass
@@ -161,7 +181,9 @@ def load_compressai_model(model_name: str, quality: int, device: torch.device):
 
     model_class = compressai_models.get(model_name, None)
     if not model_class:
-        raise ValueError(f"Model {model_name} not found in compressai.zoo.models")
+        raise ValueError(
+            f"Model {model_name} not found in compressai.zoo.models"
+        )
 
     torch.cuda.empty_cache()
     model = model_class(quality=quality, pretrained=True).to(device).eval()
@@ -172,19 +194,51 @@ def load_compressai_model(model_name: str, quality: int, device: torch.device):
 
 def load_tcm_model(p: int, device: torch.device, base_dir: str):
     """Load and configure a TCM model."""
-    tcm_path = os.path.join(base_dir, "LIC_TCM-main")
-    if tcm_path not in sys.path:
-        sys.path.append(tcm_path)
+
+    base_dir_p = Path(base_dir).expanduser()
+    tcm_path = (base_dir_p / "LIC_TCM").resolve()
+
+    try:
+        from tcm_setup import ensure_tcm_assets
+
+        ensure_tcm_assets(tcm_dir=tcm_path)
+    except Exception as e:
+        raise RuntimeError(
+            "TCM assets are missing and auto-setup failed. "
+            "Try running `python setup.py` from the repo root, "
+            "or ensure git + gdown are available. "
+            f"Details: {e}"
+        ) from e
+    tcm_path_s = str(tcm_path)
+    if not sys.path or sys.path[0] != tcm_path_s:
+        try:
+            sys.path.remove(tcm_path_s)
+        except ValueError:
+            pass
+        sys.path.insert(0, tcm_path_s)
+    try:
+        m = sys.modules.get("models", None)
+        if m is not None and getattr(m, "__path__", None) is None:
+            del sys.modules["models"]
+        # Also evict submodule cache if any
+        if "models.tcm" in sys.modules:
+            del sys.modules["models.tcm"]
+    except Exception:
+        pass
 
     checkpoint_map = {
-        128: os.path.join(tcm_path, "mse_lambda_0.05.pth.tar"),
-        64: os.path.join(tcm_path, "mse_lambda_0.0025.pth.tar"),
+        128: str(tcm_path / "mse_lambda_0.05.pth.tar"),
+        64: str(tcm_path / "mse_lambda_0.0025.pth.tar"),
     }
     if p not in checkpoint_map:
-        raise ValueError(f"Unsupported p value: {p}. Supported: {list(checkpoint_map.keys())}")
+        raise ValueError(
+            f"Unsupported p value: {p}. Supported: {list(checkpoint_map.keys())}"
+        )
 
     checkpoint = torch.load(checkpoint_map[p], map_location=device)
-    state_dict = {k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()}
+    state_dict = {
+        k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()
+    }
 
     from models.tcm import TCM
     model = TCM(
@@ -205,7 +259,7 @@ def load_model(
     quality: int,
     device: torch.device,
     p: int = 128,
-    base_dir: str = "/home/nkalmykov/compressai_project/experiments",
+    base_dir: str | None = None,
 ):
     """
     Universal model loader for NIC and traditional codecs.
@@ -222,6 +276,8 @@ def load_model(
     if name in ImageCodecModel.SUPPORTED_CODECS:
         return ImageCodecModel(name, quality)
     elif name == 'tcm':
+        if base_dir is None:
+            base_dir = str(Path(__file__).resolve().parent / "third_party")
         return load_tcm_model(p, device, base_dir)
     else:
         return load_compressai_model(model_name, quality, device)
@@ -242,6 +298,6 @@ def get_available_models(include_codecs: bool = True) -> list:
 
     models = ['tcm'] + available
     if include_codecs:
-        models += list(ImageCodecModel.SUPPORTED_CODECS - {'jpeg2000'})  # jpeg2000 often problematic
+        # jpeg2000 is often problematic / flaky across environments
+        models += list(ImageCodecModel.SUPPORTED_CODECS - {'jpeg2000'})
     return models
-
