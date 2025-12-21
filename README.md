@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <em>3D overview of median frequency leakage (L<sub>k</sub>) for 10 codecs. Each panel: x = quality q (p for TCM), y = image size, z = median L<sub>k</sub> (↓ better). Values are medians across frequency bins, averaged over 100 runs.</em>
+  <em>3D overview of median frequency leakage (L<sub>k</sub>) for 10 codecs. Each panel: x = quality, y = image size, z = median L<sub>k</sub> (↓ better). Values are medians across frequency bins, averaged over 100 runs.</em>
 </p>
 
 ---
