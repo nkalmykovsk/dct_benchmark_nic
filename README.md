@@ -87,31 +87,12 @@ dct_benchmark_nic/
 └── requirements.txt
 ```
 
----
-
-## Results Summary
-
-| Model | Type | Median L<sub>k</sub> (q=1, 512×512) |
-|-------|------|-------------------------------------|
-| TCM | Neural | **0.002** |
-| JPEG | Traditional | 0.058 |
-| JPEG XL | Traditional | 0.089 |
-| WebP | Traditional | 0.124 |
-| Cheng2020-Attn | Neural | 0.576 |
-| Cheng2020-Anchor | Neural | 0.680 |
-| MBT18 | Neural | 0.812 |
-| MBT18-Mean | Neural | 0.845 |
-| BMShj18-Hyperprior | Neural | 0.923 |
-| BMShj18-Factorized | Neural | 0.978 |
-
----
-
 ## Citation
 
 ```bibtex
 @inproceedings{kalmykov2025dct,
-  title={DCT Basis Benchmarks for Neural Image Compression: Revealing Frequency-Dependent Biases},
-  author={Kalmykov, Nikita},
+  title={DCT Basis Benchmarks for Neural Image Compression: Revealing Frequency Dependent Biases},
+  author={Kalmykov, Nikolay and ...},
   booktitle={Proceedings of [Conference Name]},
   year={2025}
 }
@@ -121,7 +102,9 @@ dct_benchmark_nic/
 
 ## License
 
-This project is released under the MIT License.
+This project is released under the **MIT License**. See `LICENSE`.
+
+---
 
 ## Acknowledgments
 
