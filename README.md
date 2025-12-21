@@ -1,6 +1,5 @@
-# DCT Basis Benchmarks for Neural Image Compression
+# DCT Basis Benchmarks for Neural Image Compression: Revealing Frequency-Dependent Biases in Learned and Traditional Codec
 
-**Revealing Frequency-Dependent Biases in Learned and Traditional Codecs**
 
 <p align="center">
   <img src="images/overview_3d_median_leak_allmodels.png" alt="3D Overview of Median Frequency Leakage" width="100%">
