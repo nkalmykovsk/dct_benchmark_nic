@@ -27,14 +27,14 @@ This repository provides a systematic benchmark for evaluating **frequency respo
 
 We propose six metrics computed from the response matrix **R** obtained by compressing DCT basis images:
 
-| Metric | Symbol | Description | Optimal |
-|--------|--------|-------------|---------|
-| **Frequency Leakage** | L<sub>k</sub> | Energy leaking to off-diagonal elements: L<sub>k</sub> = 1 − diag(R)<sub>k</sub> | ↓ lower |
-| **Off-Diagonal Ratio** | ODR<sub>k</sub> | Ratio of off-diagonal to diagonal response | ↓ lower |
-| **Centroid Shift** | \|Δc<sub>k</sub>\| | Displacement of energy centroid from diagonal position | ↓ lower |
-| **Spread** | s<sub>k</sub> | Spatial spread of response around the diagonal | ↓ lower |
-| **Entropy** | H<sub>k</sub> | Shannon entropy of the normalized response distribution (bits) | ↓ lower |
-| **Concentration Energy** | CE<sub>k</sub>(w) | Energy ratio within window w around diagonal | ↑ higher |
+| Metric | Symbol | Description |
+|--------|--------|-------------|
+| **Frequency Leakage** | L<sub>k</sub> | Energy leaking to off-diagonal elements: L<sub>k</sub> = 1 − diag(R)<sub>k</sub> |
+| **Off-Diagonal Ratio** | ODR<sub>k</sub> | Ratio of off-diagonal to diagonal response |
+| **Centroid Shift** | \|Δc<sub>k</sub>\| | Displacement of energy centroid from diagonal position |
+| **Spread** | s<sub>k</sub> | Spatial spread of response around the diagonal |
+| **Entropy** | H<sub>k</sub> | Shannon entropy of the normalized response distribution (bits) |
+| **Concentration Energy** | CE<sub>k</sub>(w) | Energy ratio within window w around diagonal |
 
 ---
 
