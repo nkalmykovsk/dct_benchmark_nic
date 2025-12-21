@@ -1,4 +1,4 @@
-# DCT Basis Benchmarks for Neural Image Compression: Revealing Frequency-Dependent Biases in Learned and Traditional Codec
+# DCT Basis Benchmarks for Neural Image Compression: Revealing Frequency Dependent Biases
 
 
 <p align="center">
