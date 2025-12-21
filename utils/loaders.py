@@ -199,7 +199,7 @@ def load_tcm_model(p: int, device: torch.device, base_dir: str):
     tcm_path = (base_dir_p / "LIC_TCM").resolve()
 
     try:
-        from tcm_setup import ensure_tcm_assets
+        from .tcm_setup import ensure_tcm_assets
 
         ensure_tcm_assets(tcm_dir=tcm_path)
     except Exception as e:
@@ -277,7 +277,7 @@ def load_model(
         return ImageCodecModel(name, quality)
     elif name == 'tcm':
         if base_dir is None:
-            base_dir = str(Path(__file__).resolve().parent / "third_party")
+            base_dir = str(Path(__file__).resolve().parents[1] / "third_party")
         return load_tcm_model(p, device, base_dir)
     else:
         return load_compressai_model(model_name, quality, device)

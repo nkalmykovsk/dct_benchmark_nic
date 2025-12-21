@@ -27,7 +27,7 @@ def _run(cmd: list[str], quiet: bool = False) -> None:
 
 def default_third_party_dir() -> Path:
     """Return `<repo>/third_party` for this project."""
-    return Path(__file__).resolve().parent / "third_party"
+    return Path(__file__).resolve().parents[1] / "third_party"
 
 
 def default_tcm_dir() -> Path:

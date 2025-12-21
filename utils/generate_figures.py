@@ -44,6 +44,11 @@ def _default_results_root():
     return Path(__file__).resolve().parents[1] / 'results'
 
 
+def _default_repo_root():
+    """Return repository root directory."""
+    return Path(__file__).resolve().parents[1]
+
+
 def _fmt_smart(x):
     """Format numeric value with adaptive precision."""
     if x is None or (isinstance(x, float) and (np.isnan(x) or np.isinf(x))):
