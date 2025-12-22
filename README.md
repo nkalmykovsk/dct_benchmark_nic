@@ -67,7 +67,7 @@ The notebook executes experiments across:
 ### Generate Figures
 
 ```bash
-python utils/generate_figures.py --root results/
+python3 utils/generate_figures.py --root results/
 ```
 
 ---
