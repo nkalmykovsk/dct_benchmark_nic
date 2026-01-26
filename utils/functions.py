@@ -752,7 +752,7 @@ def adaptive_finetune_on_leakage(
     min_lambda_low_mse: float = 1e-2,
     lambda_distortion_max: float = 2e-2,
     lambda_odr: float = 2e-3,
-    print_every: int = 50,
+    print_every: int = 20,
     eval_runs: int = 20,
     robust_eval_every: int = 40,
     robust_eval_runs: int = 5,
