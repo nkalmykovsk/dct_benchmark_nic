@@ -210,21 +210,26 @@ def load_tcm_model(p: int, device: torch.device, base_dir: str):
             f"Details: {e}"
         ) from e
     tcm_path_s = str(tcm_path)
-    if not sys.path or sys.path[0] != tcm_path_s:
-        try:
-            sys.path.remove(tcm_path_s)
-        except ValueError:
-            pass
-        sys.path.insert(0, tcm_path_s)
+    
+    # Clean up any cached models modules that might conflict
     try:
-        m = sys.modules.get("models", None)
-        if m is not None and getattr(m, "__path__", None) is None:
-            del sys.modules["models"]
-        # Also evict submodule cache if any
-        if "models.tcm" in sys.modules:
-            del sys.modules["models.tcm"]
+        modules_to_remove = []
+        for k in list(sys.modules.keys()):
+            if k == "models" or k.startswith("models."):
+                # Check if this module is from a different path
+                mod = sys.modules[k]
+                mod_file = getattr(mod, "__file__", None)
+                if mod_file and tcm_path_s not in mod_file:
+                    modules_to_remove.append(k)
+        for k in modules_to_remove:
+            del sys.modules[k]
     except Exception:
         pass
+    
+    # Ensure TCM path is at the beginning
+    if tcm_path_s in sys.path:
+        sys.path.remove(tcm_path_s)
+    sys.path.insert(0, tcm_path_s)
 
     checkpoint_map = {
         128: str(tcm_path / "mse_lambda_0.05.pth.tar"),
@@ -254,6 +259,70 @@ def load_tcm_model(p: int, device: torch.device, base_dir: str):
     return model
 
 
+def load_ftic_model(quality: int, device: torch.device, base_dir: str):
+    """Load FTIC model (ICLR2024)."""
+    base_dir_p = Path(base_dir).expanduser()
+    ftic_path = (base_dir_p / "ICLR2024-FTIC").resolve()
+    
+    checkpoint_map = {
+        1: "ckpt_mse_0018.pth",
+        2: "ckpt_mse_0035.pth",
+        3: "ckpt_mse_0067.pth",
+        4: "ckpt_mse_0130.pth",
+        5: "ckpt_mse_0250.pth",
+        6: "ckpt_mse_0483.pth",
+    }
+    
+    if quality not in checkpoint_map:
+        raise ValueError(f"Quality {quality} not in {list(checkpoint_map.keys())}")
+    
+    ckpt_path = ftic_path / "checkpoints" / checkpoint_map[quality]
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+    
+    ftic_path_s = str(ftic_path)
+    
+    # Clean up any cached models modules that might conflict
+    try:
+        modules_to_remove = []
+        for k in list(sys.modules.keys()):
+            if k == "models" or k.startswith("models."):
+                # Check if this module is from a different path
+                mod = sys.modules[k]
+                mod_file = getattr(mod, "__file__", None)
+                if mod_file and ftic_path_s not in mod_file:
+                    modules_to_remove.append(k)
+        for k in modules_to_remove:
+            del sys.modules[k]
+    except Exception:
+        pass
+    
+    # Ensure FTIC path is at the beginning
+    if ftic_path_s in sys.path:
+        sys.path.remove(ftic_path_s)
+    sys.path.insert(0, ftic_path_s)
+    
+    # Now import
+    from models.flic import FrequencyAwareTransFormer
+    
+    model = FrequencyAwareTransFormer().to(device).eval()
+    checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
+    
+    if "state_dict" in checkpoint:
+        state_dict = checkpoint["state_dict"]
+    else:
+        state_dict = checkpoint
+    
+    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict)
+    model.update()
+    
+    for param in model.parameters():
+        param.requires_grad = False
+    
+    return model
+
+
 def load_model(
     model_name: str,
     quality: int,
@@ -265,11 +334,11 @@ def load_model(
     Universal model loader for NIC and traditional codecs.
 
     Args:
-        model_name: 'tcm', CompressAI model name, or codec ('jpeg', 'webp', 'jpegxl', 'jpeg2000')
+        model_name: 'tcm', 'ftic', CompressAI model name, or codec ('jpeg', 'webp', 'jpegxl', 'jpeg2000')
         quality: Quality level (1-6 for most models)
         device: torch device
         p: TCM-specific parameter (64 or 128)
-        base_dir: Base directory for TCM checkpoints
+        base_dir: Base directory for TCM/FTIC checkpoints
     """
     name = model_name.lower()
 
@@ -279,6 +348,10 @@ def load_model(
         if base_dir is None:
             base_dir = str(Path(__file__).resolve().parents[1] / "third_party")
         return load_tcm_model(p, device, base_dir)
+    elif name == 'ftic':
+        if base_dir is None:
+            base_dir = str(Path(__file__).resolve().parents[1] / "third_party")
+        return load_ftic_model(quality, device, base_dir)
     else:
         return load_compressai_model(model_name, quality, device)
 
@@ -296,7 +369,7 @@ def get_available_models(include_codecs: bool = True) -> list:
     except ImportError:
         available = []
 
-    models = ['tcm'] + available
+    models = ['tcm', 'ftic'] + available
     if include_codecs:
         # jpeg2000 is often problematic / flaky across environments
         models += list(ImageCodecModel.SUPPORTED_CODECS - {'jpeg2000'})
