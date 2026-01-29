@@ -323,6 +323,141 @@ def load_ftic_model(quality: int, device: torch.device, base_dir: str):
     return model
 
 
+class StableCodecWrapper:
+    """Wrapper for StableCodec to match CompressAI-style interface."""
+    
+    def __init__(self, stablecodec_model):
+        self.model = stablecodec_model
+    
+    def __call__(self, x: torch.Tensor) -> dict:
+        """
+        Compress and decompress input tensor.
+        """
+        # StableCodec expects input in range [-1, 1]
+        x_normalized = x * 2.0 - 1.0
+        
+        # Pad to multiple of 256
+        _, _, h, w = x.shape
+        pad_h = (256 - h % 256) % 256
+        pad_w = (256 - w % 256) % 256
+        
+        if pad_h > 0 or pad_w > 0:
+            import torch.nn.functional as F
+            x_padded = F.pad(x_normalized, (0, pad_w, 0, pad_h), mode='reflect')
+        else:
+            x_padded = x_normalized
+        
+        # Compress
+        with torch.no_grad():
+            output_dict = self.model.compress(x_padded)
+        
+        # Decompress
+        pos_prompt = [1]  # Dummy prompt
+        with torch.no_grad():
+            x_hat = self.model.decompress(
+                output_dict["strings"],
+                output_dict["shape"],
+                pos_prompt
+            )
+        
+        # Crop to original size
+        x_hat = x_hat[:, :, :h, :w]
+        
+        # Convert from [-1, 1] to [0, 1]
+        x_hat = (x_hat + 1.0) / 2.0
+        x_hat = torch.clamp(x_hat, 0.0, 1.0)
+        
+        # Clean up CUDA cache to prevent OOM
+        if x.is_cuda:
+            torch.cuda.empty_cache()
+        
+        return {"x_hat": x_hat}
+
+
+def load_stablecodec_model(quality: int, device: torch.device, base_dir: str):
+    """
+    Load StableCodec model (ICCV 2025).
+    """
+    base_dir_p = Path(base_dir).expanduser()
+    stablecodec_path = (base_dir_p / "StableCodec").resolve()
+    sd_turbo_path = (base_dir_p / "sd-turbo").resolve()
+    
+    # Map quality to checkpoint
+    checkpoint_map = {
+        1: "stablecodec_ft2.pkl",   # ~0.035 bpp
+        2: "stablecodec_ft4.pkl",   # ~0.025 bpp
+        3: "stablecodec_ft8.pkl",   # ~0.017 bpp
+        4: "stablecodec_ft12.pkl",  # ~0.013 bpp
+        5: "stablecodec_ft16.pkl",  # ~0.010 bpp
+        6: "stablecodec_ft32.pkl",  # ~0.005 bpp
+    }
+    
+    if quality not in checkpoint_map:
+        raise ValueError(f"Quality {quality} not in {list(checkpoint_map.keys())}")
+    
+    # Check paths
+    ckpt_path = stablecodec_path / "checkpoints" / checkpoint_map[quality]
+    elic_path = stablecodec_path / "checkpoints" / "elic_official.pth"
+    
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"StableCodec checkpoint not found: {ckpt_path}")
+    if not elic_path.exists():
+        raise FileNotFoundError(f"ELIC checkpoint not found: {elic_path}")
+    if not sd_turbo_path.exists():
+        raise FileNotFoundError(f"SD-Turbo not found: {sd_turbo_path}")
+    
+    stablecodec_path_s = str(stablecodec_path / "src")
+    stablecodec_root = str(stablecodec_path)
+    
+    try:
+        modules_to_remove = []
+        for k in list(sys.modules.keys()):
+            if any(k.startswith(prefix) for prefix in ["model", "latent_codec", "StableCodec", "ELIC", "my_utils"]):
+                mod = sys.modules[k]
+                mod_file = getattr(mod, "__file__", None)
+                if mod_file and stablecodec_path_s not in mod_file and stablecodec_root not in mod_file:
+                    modules_to_remove.append(k)
+        for k in modules_to_remove:
+            del sys.modules[k]
+    except Exception:
+        pass
+    
+    if stablecodec_path_s in sys.path:
+        sys.path.remove(stablecodec_path_s)
+    sys.path.insert(0, stablecodec_path_s)
+    
+    if stablecodec_root in sys.path:
+        sys.path.remove(stablecodec_root)
+    sys.path.insert(0, stablecodec_root)
+    
+    from StableCodec import StableCodec
+    
+    class Args:
+        def __init__(self):
+            self.codec_path = str(ckpt_path)
+            self.elic_path = str(elic_path)
+            self.lambda_rate = quality  # Not used during inference
+            self.pos_prompt = "high quality, sharp, detailed"
+            self.latent_tiled_size = 96
+            self.latent_tiled_overlap = 32
+            self.vae_encoder_tiled_size = 256
+            self.vae_decoder_tiled_size = 256
+            self.lora_rank_vae = 16  # Must match checkpoint
+            self.lora_rank_unet = 32  # Must match checkpoint
+    
+    args = Args()
+    
+    print(f"[StableCodec] Loading quality level {quality} ({checkpoint_map[quality]})...")
+    model = StableCodec(sd_path=str(sd_turbo_path), args=args)
+    model.to(device).eval()
+    model.codec.update(force=True)
+    for param in model.parameters():
+        param.requires_grad = False
+    print("[StableCodec] Model loaded successfully!")
+    
+    return StableCodecWrapper(model)
+
+
 def load_model(
     model_name: str,
     quality: int,
@@ -334,11 +469,11 @@ def load_model(
     Universal model loader for NIC and traditional codecs.
 
     Args:
-        model_name: 'tcm', 'ftic', CompressAI model name, or codec ('jpeg', 'webp', 'jpegxl', 'jpeg2000')
+        model_name: 'stablecodec', 'flic', 'tcm', CompressAI model name, or codec ('jpeg', 'webp', 'jpegxl', 'jpeg2000')
         quality: Quality level (1-6 for most models)
         device: torch device
         p: TCM-specific parameter (64 or 128)
-        base_dir: Base directory for TCM/FTIC checkpoints
+        base_dir: Base directory for StableCodec/FTIC/TCM checkpoints
     """
     name = model_name.lower()
 
@@ -352,6 +487,10 @@ def load_model(
         if base_dir is None:
             base_dir = str(Path(__file__).resolve().parents[1] / "third_party")
         return load_ftic_model(quality, device, base_dir)
+    elif name == 'stablecodec':
+        if base_dir is None:
+            base_dir = str(Path(__file__).resolve().parents[1] / "third_party")
+        return load_stablecodec_model(quality, device, base_dir)
     else:
         return load_compressai_model(model_name, quality, device)
 
@@ -369,7 +508,7 @@ def get_available_models(include_codecs: bool = True) -> list:
     except ImportError:
         available = []
 
-    models = ['tcm', 'ftic'] + available
+    models = ['stablecodec', 'ftic', 'tcm'] + available
     if include_codecs:
         # jpeg2000 is often problematic / flaky across environments
         models += list(ImageCodecModel.SUPPORTED_CODECS - {'jpeg2000'})
