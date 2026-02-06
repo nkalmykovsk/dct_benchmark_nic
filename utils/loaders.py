@@ -508,7 +508,8 @@ def get_available_models(include_codecs: bool = True) -> list:
     except ImportError:
         available = []
 
-    models = ['stablecodec', 'ftic', 'tcm'] + available
+    # models = ['stablecodec', 'ftic', 'tcm'] + available
+    models = ['ftic', 'tcm'] + available
     if include_codecs:
         # jpeg2000 is often problematic / flaky across environments
         models += list(ImageCodecModel.SUPPORTED_CODECS - {'jpeg2000'})
