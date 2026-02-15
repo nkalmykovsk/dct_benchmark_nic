@@ -9,7 +9,6 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from scipy.fft import dct, idct
-from scipy.ndimage import rotate as ndi_rotate
 
 
 def compute_dct_smearing_metrics(
@@ -152,250 +151,20 @@ def set_random_seed(seed):
             pass
 
 
-def _source_size_for_rotation(size: int, rotation_deg: float, crop_factor: float | None) -> int:
-    """Compute source size M so that after rotating M×M by rotation_deg, center N×N has no black corners."""
-    if rotation_deg == 0:
-        return size
-    a_rad = math.radians(rotation_deg)
-    base_m = int(math.ceil(size * (abs(math.cos(a_rad)) + abs(math.sin(a_rad)))))
-    m = max(size, base_m)
-    if crop_factor is not None and crop_factor >= 1.0:
-        m = max(m, int(math.ceil(size * crop_factor)))
-    return m
+def create_dct_basis_tensor(size, device):
+    """Create DCT basis image (HxWx3) and normalized input tensor [1,3,H,W]."""
+    # Construct DCT matrix (apply 1D DCT to identity)
+    x = np.eye(size)
+    x_dct = dct(x, axis=1, norm="ortho")
 
+    # Replicate into 3 channels
+    x_dct_rgb = np.stack([x_dct, x_dct, x_dct], axis=-1)
 
-def build_extended_dct_field(N: int) -> np.ndarray:
-    """
-    Extended DCT-II field 3N×3N: D[N+n, N+k] = alpha(k)*cos(pi/N*(n+0.5)*k)
-    for n, k in [-N, 2N-1]. Центр [N:2N, N:2N] — обычная DCT матрица N×N.
-    Нет чёрных углов: аналитическое продолжение, фаза непрерывна при повороте.
-    (Идея профессора: расширить поле, потом повернуть и вырезать центр.)
-    """
-    D = np.zeros((3 * N, 3 * N), dtype=np.float64)
-    for k in range(-N, 2 * N):
-        alpha = math.sqrt(1.0 / N) if k == 0 else math.sqrt(2.0 / N)
-        for n in range(-N, 2 * N):
-            D[N + n, N + k] = alpha * math.cos(math.pi * (n + 0.5) * k / N)
-    return D
+    # Normalize to [0,1]
+    mx, Mx = x_dct_rgb.min(), x_dct_rgb.max()
+    x_dct_norm = (x_dct_rgb - mx) / (Mx - mx + 1e-9)
 
-
-def _rotate_image_torch(img: np.ndarray, angle_deg: float) -> np.ndarray:
-    """Rotate image by angle_deg degrees (counterclockwise). Size preserved."""
-    angle_rad = math.radians(angle_deg)
-    t = torch.from_numpy(img.astype(np.float32)).unsqueeze(0).unsqueeze(0)
-    theta = torch.tensor([
-        [math.cos(angle_rad), -math.sin(angle_rad), 0],
-        [math.sin(angle_rad), math.cos(angle_rad), 0]
-    ], dtype=torch.float32).unsqueeze(0)
-    grid = F.affine_grid(theta, t.size(), align_corners=False)
-    out = F.grid_sample(t, grid, align_corners=False, mode="bilinear")
-    return out[0, 0].numpy()
-
-
-def rotate_extended_full(Dext: np.ndarray, angle_deg: float) -> np.ndarray:
-    """
-    Поворот расширенного поля Dext (3N×3N) на angle_deg градусов. Возвращает 3N×3N (без crop).
-    """
-    return _rotate_image_torch(Dext, angle_deg)
-
-
-def crop_size_for_angle(N: int, angle_deg: float) -> int:
-    """
-    Side length L of the axis-aligned square that contains an N×N square rotated by angle_deg.
-    L(θ) = N * max(|cos θ + sin θ|, |cos θ − sin θ|). For 0°: L=N; for 45°: L=N√2.
-    """
-    theta = math.radians(angle_deg)
-    c, s = math.cos(theta), math.sin(theta)
-    half = N * max(abs(c + s), abs(c - s))
-    return int(math.ceil(half))
-
-
-def _codec_allowed_sizes(model_name: str) -> list[int] | None:
-    """
-    Known square sizes H=W that specific NIC models support natively.
-
-    For our pretrained models (from probe script):
-      - ftic, tcm: multiples of 128 starting at 128 / 256 respectively.
-      - cheng2020*, mbt2018*, bmshj2018-hyperprior: multiples of 64.
-      - bmshj2018-factorized: accepts (practically) any tested size, so we
-        don't need to snap L for it.
-    """
-    name = model_name.lower()
-
-    if name == "ftic":
-        # 128, 256, 384, ..., 1024
-        return [128 * k for k in range(1, 9)]
-    if name == "tcm":
-        # 256, 384, 512, ..., 1024
-        return [128 * k for k in range(2, 9)]
-
-    compressai_names = {
-        "cheng2020-anchor",
-        "cheng2020-attn",
-        "bmshj2018-hyperprior",
-        "mbt2018-mean",
-        "mbt2018",
-    }
-    if name in compressai_names:
-        # 64, 128, ..., 1024
-        return [64 * k for k in range(1, 17)]
-
-    # bmshj2018-factorized и классические кодеки принимают почти любые размеры;
-    # не ограничиваем L формально.
-    return None
-
-
-def _choose_codec_L(N: int, angle_deg: float, model_name: str | None) -> int | None:
-    """
-    Choose L for rotated crop based on codec's native supported sizes.
-
-    Returns:
-        codec_L: минимальный поддерживаемый размер модели >= геометрическому
-                 crop_size_for_angle(N, angle_deg), либо None если не удалось.
-    """
-    if model_name is None or angle_deg == 0:
-        return None
-
-    allowed = _codec_allowed_sizes(model_name)
-    if not allowed:
-        return None
-
-    L_geo = crop_size_for_angle(N, angle_deg)
-    for s in sorted(allowed):
-        if s >= L_geo:
-            return s
-    return None
-
-
-def _fixed_L_for_angle_sweep(
-    N: int,
-    angle_range: list[float],
-    model_name: str | None,
-) -> int | None:
-    """
-    Единый L для всех углов в sweep: max по углам от (codec_L или L_geo).
-    Чтобы кодек видел один и тот же размер входа при всех углах — тогда
-    различие L_k по углам отражает только изотропию кодека, а не смену разрешения.
-    """
-    if not angle_range or model_name is None:
-        return None
-    best = None
-    for a in angle_range:
-        L = _choose_codec_L(N, a, model_name)
-        if L is None:
-            L = crop_size_for_angle(N, a)
-        if best is None or L > best:
-            best = L
-    return best
-
-
-def crop_containing_square(rotated_3N: np.ndarray, N: int, angle_deg: float | None = None) -> np.ndarray:
-    """
-    Crop from rotated 3N×3N an axis-aligned square of side L centered at the image center.
-    L is chosen so the square contains the rotated N×N block:
-    L(θ) = ceil(N * max(|cos θ + sin θ|, |cos θ − sin θ|)).
-    If angle_deg is None, uses 45° (L = ceil(N√2)).
-    """
-    if angle_deg is None:
-        L = int(math.ceil(N * math.sqrt(2)))
-    else:
-        L = crop_size_for_angle(N, angle_deg)
-    size = rotated_3N.shape[0]
-    start = (size - L) // 2
-    return rotated_3N[start : start + L, start : start + L].copy()
-
-
-def rotate_back_and_crop_n(img_LxL: np.ndarray, N: int, angle_deg: float) -> np.ndarray:
-    """
-    Rotate back by -angle_deg and crop center N×N. Input: L×L (L = crop_size_for_angle(N, angle_deg)).
-    After codec: pass the reconstructed L×L here to get final N×N for metrics.
-    """
-    rotated = _rotate_image_torch(img_LxL, -angle_deg)
-    L = rotated.shape[0]
-    start = (L - N) // 2
-    return rotated[start : start + N, start : start + N].copy()
-
-
-def create_dct_basis_tensor(
-    size,
-    device,
-    rotation_deg: float = 0.0,
-    crop_factor=None,
-    use_extended_rotation: bool = True,
-    codec_L: int | None = None,
-):
-    """Create DCT basis image (HxWx3) and normalized input tensor [1,3,H,W].
-
-    When rotation_deg != 0:
-      - If use_extended_rotation=True (default): расширенное поле 3N×3N (аналитическое продолжение,
-        без чёрных углов, фаза непрерывна) → поворот → вырез L×L (L = crop_size_for_angle(N, θ)),
-        содержащего повёрнутый N×N целиком (без чёрных углов и обрывов для кодека).
-      - If use_extended_rotation=False: M×M DCT, rotate с mode=constant (могут быть артефакты фазы).
-
-    Args:
-        size: Output size N (target block size).
-        device: Torch device for tensor.
-        rotation_deg: Rotation angle in degrees (0 = no rotation, default).
-        crop_factor: If set (e.g. 2), use at least size*crop_factor for M (only if not use_extended_rotation).
-        use_extended_rotation: If True, use extended 3N×3N field for rotation (no phase break).
-    """
-    if rotation_deg == 0:
-        # При 0°: если задан codec_L > N — паддим N×N до L×L (центр) для консистентного размера по углам.
-        x = np.eye(size)
-        x_dct = dct(x, axis=1, norm="ortho")
-        x_dct_rgb = np.stack([x_dct, x_dct, x_dct], axis=-1).astype(np.float32)
-        if codec_L is not None and codec_L > size:
-            L = int(codec_L)
-            pad = (L - size) // 2
-            x_dct_crop = np.zeros((L, L, 3), dtype=np.float32)
-            x_dct_crop[pad : pad + size, pad : pad + size, :] = x_dct_rgb
-            x_dct_rgb = x_dct_crop
-        mx, Mx = float(x_dct_rgb.min()), float(x_dct_rgb.max())
-        x_dct_norm = (x_dct_rgb - mx) / (Mx - mx + 1e-9)
-        x_tensor = (
-            torch.from_numpy(x_dct_norm)
-            .float()
-            .permute(2, 0, 1)
-            .unsqueeze(0)
-            .to(device)
-        )
-        return x_dct_rgb, x_tensor, mx, Mx
-
-    if use_extended_rotation:
-        # Пайплайн: 3N×3N (аналитическое продолжение) → поворот → вырез L×L.
-        # L_geo = минимальный квадрат, содержащий повёрнутый N×N; при наличии
-        # codec_L (поддерживаемый размер модели) берём ближайший больший:
-        Dext = build_extended_dct_field(size)
-        rotated = rotate_extended_full(Dext, rotation_deg)
-        L_geo = crop_size_for_angle(size, rotation_deg)
-        if codec_L is not None and codec_L >= L_geo:
-            L = int(codec_L)
-        else:
-            L = int(L_geo)
-        size_3n = Dext.shape[0]
-        start = (size_3n - L) // 2
-        crop_np = rotated[start : start + L, start : start + L].copy()
-        x_dct_crop = np.stack([crop_np, crop_np, crop_np], axis=-1).astype(np.float32)
-    else:
-        # Старый путь: M×M DCT → rotate с constant fill → crop
-        M = _source_size_for_rotation(size, rotation_deg, crop_factor)
-        x = np.eye(M)
-        x_dct = dct(x, axis=1, norm="ortho")
-        x_dct_rgb = np.stack([x_dct, x_dct, x_dct], axis=-1)
-        mx, Mx = x_dct_rgb.min(), x_dct_rgb.max()
-        rotated = ndi_rotate(
-            x_dct_rgb.astype(np.float64),
-            float(rotation_deg),
-            reshape=False,
-            order=1,
-            mode="constant",
-            cval=float(mx),
-        )
-        top = (M - size) // 2
-        x_dct_crop = rotated[top : top + size, top : top + size, :].astype(np.float32)
-
-    mx, Mx = float(x_dct_crop.min()), float(x_dct_crop.max())
-    x_dct_norm = (x_dct_crop - mx) / (Mx - mx + 1e-9)
+    # Convert to tensor [1,3,H,W]
     x_tensor = (
         torch.from_numpy(x_dct_norm)
         .float()
@@ -403,14 +172,26 @@ def create_dct_basis_tensor(
         .unsqueeze(0)
         .to(device)
     )
-    return x_dct_crop, x_tensor, mx, Mx
+
+    return x_dct_rgb, x_tensor, mx, Mx
 
 
 def _forward_x_hat(model, x_tensor):
+    """Forward pass. Returns (x_hat_cpu, bpp_or_none)."""
     out = model(x_tensor)
     if not isinstance(out, dict) or "x_hat" not in out:
         raise TypeError("model(x) must return a dict containing key 'x_hat'")
-    return out["x_hat"].detach().cpu()
+    x_hat = out["x_hat"].detach().cpu()
+    bpp = None
+    if "bpp" in out and out["bpp"] is not None:
+        bpp = float(out["bpp"])
+    elif "likelihoods" in out:
+        num_pixels = x_tensor.shape[2] * x_tensor.shape[3]
+        bpp = sum(
+            (-torch.log2(lk.clamp(min=1e-9))).sum().item()
+            for lk in out["likelihoods"].values()
+        ) / num_pixels
+    return x_hat, bpp
 
 
 def _denormalize_to_dct_rgb(x_hat_norm, mx, Mx):
@@ -503,20 +284,9 @@ def evaluate_frequency_response(
     show_metric_plots=True,
     seed=None,
     verbose=True,
-    rotation_deg=0.0,
-    crop_factor=None,
-    model_name: str | None = None,
-    angle_range_for_fixed_L: list[float] | None = None,
 ):
     """
     Evaluate frequency response of a NIC model using DCT basis matrix input.
-
-    Pipeline when rotation_deg != 0: 3N×3N → rotate → crop L×L (contains rotated N×N, no black corners)
-    → codec(L×L) → decode L×L → rotate back −α → crop center N×N → metrics on N×N (0° frame).
-
-    Если задан angle_range_for_fixed_L, для всех углов (включая 0°) в кодек подаётся один и тот же L×L:
-    при 0° — N×N центрируется в canvas L×L (паддинг), при ненулевых углах — вырез L×L.
-    Метрики считаются по центральным N×N; сравнение L_k по углам честное (один размер входа).
 
     Args:
         model: Trained NIC model (expects input in [0,1], shape [1,3,H,W])
@@ -526,51 +296,15 @@ def evaluate_frequency_response(
         num_runs: Number of runs to average metrics over
         show_metric_plots: Whether to visualize metric plots
         seed: Random seed for reproducibility
-        rotation_deg: Rotation angle in degrees (0 = no rotation, default).
-        crop_factor: If set, source size for rotation is at least size*crop_factor.
-        model_name: Optional model identifier ('ftic', 'tcm', ...). Нужен для выбора L и для fixed L.
-        angle_range_for_fixed_L: Если задан, для всех углов (включая 0°) в кодек подаётся один L×L:
-            при 0° — паддинг N×N до L×L; при ненулевых — вырез L×L. Метрики по центральным N×N.
     Returns:
-        x_dct_rgb: Reference DCT basis in 0° frame (H,W,3), always N×N.
-                   При ненулевом угле кодек фактически видит L×L (через create_dct_basis_tensor),
-                   но наружу для сохранения/построения графиков возвращается финальный N×N.
-        x_hat: Decompressed from last run (H,W,3), rotated back and cropped to N×N when rotation_deg != 0.
-        metrics: Averaged frequency smearing metrics (computed on N×N in 0° frame when rotated).
+        x_dct_rgb: Original DCT basis (H,W,3)
+        x_hat: Decompressed DCT basis from last run (H,W,3)
+        metrics: Dictionary of averaged frequency smearing metrics over num_runs
     """
 
     set_random_seed(seed)
+    x_dct_rgb, x_tensor, mx, Mx = create_dct_basis_tensor(size, device)
 
-    # Единый L для всех углов (включая 0°) при angle_range_for_fixed_L — консистентный размер в кодеке.
-    codec_L = None
-    if model_name is not None:
-        if angle_range_for_fixed_L is not None:
-            codec_L = _fixed_L_for_angle_sweep(size, angle_range_for_fixed_L, model_name)
-        elif rotation_deg != 0:
-            codec_L = _choose_codec_L(size, rotation_deg, model_name)
-
-    x_dct_rgb, x_tensor, mx, Mx = create_dct_basis_tensor(
-        size,
-        device,
-        rotation_deg=rotation_deg,
-        crop_factor=crop_factor,
-        codec_L=codec_L,
-    )
-
-    # Optional padding for models with windowed attention (e.g., FTIC) that
-    # require H,W кратны размеру окна. Паддим только для входа в модель,
-    # потом обрезаем декод обратно до исходного L×L.
-    _, _, H_in, W_in = x_tensor.shape
-    pad_multiple = 256  # FTIC g_a: 4× stride-2 → H/16; на всех уровнях нужна кратность 16 (окна)
-    pad_h = (pad_multiple - H_in % pad_multiple) % pad_multiple
-    pad_w = (pad_multiple - W_in % pad_multiple) % pad_multiple
-    orig_h, orig_w = H_in, W_in
-    if pad_h > 0 or pad_w > 0:
-        x_tensor_padded = F.pad(x_tensor, (0, pad_w, 0, pad_h), mode="constant", value=0.0)
-    else:
-        x_tensor_padded = x_tensor
-
-    # Run multiple forwards and aggregate metrics
     leakage_list = []
     odr_list = []
     centroid_shift_list = []
@@ -579,31 +313,24 @@ def evaluate_frequency_response(
     entropy_list = []
     cum_energy_accumulator = {}
     R_list = []
+    bpp_list = []
     x_hat = None
     x_idct = None
     x_hat_norm = None
 
-    # Compress & decompress with NIC model
     runs = int(max(1, num_runs))
     for _ in range(runs):
         with torch.no_grad():
-            x_hat_norm = _forward_x_hat(model, x_tensor_padded)
+            x_hat_norm, run_bpp = _forward_x_hat(model, x_tensor)
+        if run_bpp is not None:
+            bpp_list.append(run_bpp)
         x_hat_run = _denormalize_to_dct_rgb(x_hat_norm, mx, Mx)
-        # Remove padding in spatial dims, вернуться к исходному L×L
-        if pad_h > 0 or pad_w > 0:
-            x_hat_run = x_hat_run[:orig_h, :orig_w, :]
         x_hat = x_hat_run  # save last run's outputs for visualization
         x_idct = _idct_rgb(x_hat_run)  # iDCT per channel
 
-        # Metrics on grayscale: при повороте — L×L → rotate back → crop N×N; при 0° — crop center N×N если был L×L
-        gray_decoded = x_hat_run.mean(axis=2)
-        if rotation_deg != 0:
-            gray_decoded = rotate_back_and_crop_n(gray_decoded, size, rotation_deg)  # L×L → N×N
-        elif gray_decoded.shape[0] > size:
-            start = (gray_decoded.shape[0] - size) // 2
-            gray_decoded = gray_decoded[start : start + size, start : start + size].copy()
+        # Metrics on grayscale
         m = compute_dct_smearing_metrics(
-            gray_decoded,
+            x_hat_run.mean(axis=2),
             axis=0,
             normalize_freq=True,
             show_plots=False,
@@ -639,8 +366,8 @@ def evaluate_frequency_response(
         for w_key, arrs in cum_energy_accumulator.items()
     }
 
-    # Build metrics dictionary
     indices_arr = np.arange(size)
+    avg_bpp = float(np.mean(bpp_list)) if bpp_list else None
     avg_metrics = {
         "num_runs": runs,
         "indices": indices_arr,
@@ -651,6 +378,7 @@ def evaluate_frequency_response(
         "entropy": entropy_avg,
         "cum_energy": cum_energy_avg,
         "R": R_mean,
+        "bpp": avg_bpp,
     }
 
     summary_window = 2
@@ -676,27 +404,6 @@ def evaluate_frequency_response(
         summary = None
     avg_metrics["summary"] = summary
 
-    # Возвращаем финальные N×N в 0°: при повороте — rotate back + кроп; при 0° и L×L — кроп центра N×N.
-    if rotation_deg != 0:
-        if x_hat is not None:
-            x_hat_back = np.zeros((size, size, 3), dtype=x_hat.dtype)
-            for c in range(3):
-                x_hat_back[..., c] = rotate_back_and_crop_n(
-                    x_hat[..., c], size, rotation_deg
-                )
-            x_hat = x_hat_back
-            x_idct = _idct_rgb(x_hat)
-        x = np.eye(size)
-        x_dct = dct(x, axis=1, norm="ortho")
-        x_dct_rgb = np.stack([x_dct, x_dct, x_dct], axis=-1)
-    elif x_hat is not None and x_hat.shape[0] > size:
-        start = (x_hat.shape[0] - size) // 2
-        x_hat = x_hat[start : start + size, start : start + size, :].copy()
-        x_idct = _idct_rgb(x_hat)
-        x = np.eye(size)
-        x_dct = dct(x, axis=1, norm="ortho")
-        x_dct_rgb = np.stack([x_dct, x_dct, x_dct], axis=-1)
-
     _plot_frequency_response(
         x_dct_rgb=x_dct_rgb,
         x_hat_norm=x_hat_norm,
@@ -708,13 +415,13 @@ def evaluate_frequency_response(
 
     if verbose and avg_metrics.get("summary") is not None:
         s = avg_metrics["summary"]
+        bpp_s = f", bpp={avg_metrics['bpp']:.4f}" if avg_metrics.get('bpp') is not None else ""
         summary_str = (
             "Summary (median over k; H in bits; CE window=2; "
-            f"runs={avg_metrics['num_runs']}): "
+            f"runs={avg_metrics['num_runs']}{bpp_s}): "
             f"L_k={s['L_k']:.4f}, ODR_k={s['ODR_k']:.4f}, "
             f"|Δc_k|={s['|Delta_c_k|']:.4f}, s_k={s['s_k']:.4f}, "
-            f"H_k={s['H_k_bits']:.4f}, "
-            f"CE_k(w=2)={s['CE_k(w=2)']:.4f}"
+            f"H_k={s['H_k_bits']:.4f}, CE_k(w=2)={s['CE_k(w=2)']:.4f}"
         )
         print(summary_str)
 
@@ -723,7 +430,7 @@ def evaluate_frequency_response(
 
 # CSV and Results Utilities
 def build_row_key(row: dict, df_columns: list = None) -> str:
-    """Build unique key for a results row (Model|Size|q:X or p:X [|angle:Y])."""
+    """Build unique key for a results row (Model|Size|q:X or p:X)."""
     model = row.get('Model', '')
     size_s = row.get('Size', '')
     if df_columns and 'q' in df_columns and pd.notna(row.get('q', np.nan)):
@@ -736,11 +443,7 @@ def build_row_key(row: dict, df_columns: list = None) -> str:
         qp = f"p:{int(row['p'])}"
     else:
         qp = 'q:NA'
-    key = f"{model}|{size_s}|{qp}"
-    angle = row.get('angle_deg')
-    if angle is not None and (not isinstance(angle, float) or not np.isnan(angle)):
-        key = f"{key}|angle:{float(angle)}"
-    return key
+    return f"{model}|{size_s}|{qp}"
 
 
 def merge_and_save_csv(
@@ -763,7 +466,7 @@ def merge_and_save_csv(
     """
     if preferred_cols is None:
         preferred_cols = [
-            'Model', 'Size', 'p', 'q', 'angle_deg',
+            'Model', 'Size', 'p', 'q', 'bpp',
             'L_k', 'L_low', 'L_high', 'ODR_k', '|Delta_c_k|',
             's_k', 'H_k_bits', 'CE_k(w=2)',
         ]
@@ -800,9 +503,8 @@ def merge_and_save_csv(
             sort_by = 'q'
         elif 'p' in df_merged.columns and df_merged['p'].notna().any():
             sort_by = 'p'
-    sort_cols = [c for c in ([sort_by, 'angle_deg'] if sort_by else ['angle_deg']) if c in df_merged.columns]
-    if sort_cols:
-        df_merged = df_merged.sort_values(sort_cols)
+    if sort_by and sort_by in df_merged.columns:
+        df_merged = df_merged.sort_values(sort_by)
 
     # Select and order columns
     out_cols = [c for c in preferred_cols if c in df_merged.columns]
@@ -835,7 +537,6 @@ def build_summary_row(
     quality: int = None,
     p: int = None,
     ce_window: int = 2,
-    rotation_deg: float | None = None,
 ) -> dict:
     """Build a summary row dict from metrics."""
     R = metrics['R']
@@ -865,105 +566,14 @@ def build_summary_row(
     # Add band-wise leakage
     row.update(compute_band_leakage(leakage))
 
-    # Add quality/p parameter
     if quality is not None:
         row['q'] = int(quality)
     if p is not None:
         row['p'] = int(p)
-
-    if rotation_deg is not None:
-        row['angle_deg'] = float(rotation_deg)
+    if metrics.get('bpp') is not None:
+        row['bpp'] = float(metrics['bpp'])
 
     return row
-
-
-def compare_metrics_by_angle(
-    df: pd.DataFrame,
-    model_name: str | None = None,
-    size: str | None = None,
-    quality_param: str = "q",
-    quality_val: int | None = None,
-    metrics: list[str] | None = None,
-    save_path: Path | str | None = None,
-    title_prefix: str = "",
-) -> pd.DataFrame:
-    """Compare main metrics across angles for the same (model, size, quality).
-
-    Filters df by model_name, size, and quality (q or p), then groups by angle_deg
-    and returns a table of metric values per angle. Optionally plots and saves.
-
-    Args:
-        df: DataFrame with columns Model, Size, angle_deg, L_k, ODR_k, etc.
-        model_name: Filter by model (e.g. 'jpeg'); None = no filter.
-        size: Filter by size (e.g. '64x64'); None = no filter.
-        quality_param: 'q' or 'p'.
-        quality_val: Filter by quality level; None = no filter.
-        metrics: List of metric column names; default = main metrics.
-        save_path: If set, save comparison plot to this path.
-        title_prefix: Prefix for plot title.
-    Returns:
-        DataFrame with angle_deg and metric columns (one row per angle, or empty).
-    """
-    if metrics is None:
-        metrics = [
-            "L_k", "L_low", "L_high", "ODR_k", "|Delta_c_k|",
-            "s_k", "H_k_bits", "CE_k(w=2)",
-        ]
-    subset = df.copy()
-    if model_name is not None:
-        subset = subset[subset["Model"] == model_name]
-    if size is not None:
-        subset = subset[subset["Size"] == size]
-    if quality_val is not None and quality_param in subset.columns:
-        subset = subset[subset[quality_param] == quality_val]
-    if "angle_deg" not in subset.columns:
-        return pd.DataFrame()
-    # Baseline (no rotation) may have NaN in angle_deg — treat as 0°
-    subset = subset.copy()
-    subset["angle_deg"] = subset["angle_deg"].fillna(0.0)
-    subset = subset.sort_values("angle_deg")
-    cols = ["angle_deg"] + [c for c in metrics if c in subset.columns]
-    out = subset[cols].drop_duplicates(subset="angle_deg").reset_index(drop=True)
-
-    if save_path is not None and len(out) > 0:
-        save_path = Path(save_path)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        num_metrics = len([c for c in metrics if c in out.columns])
-        if num_metrics == 0:
-            return out
-        ncol = min(3, num_metrics)
-        nrow = (num_metrics + ncol - 1) // ncol
-        fig, axs = plt.subplots(nrow, ncol, figsize=(4 * ncol, 3 * nrow))
-        if nrow == 1 and ncol == 1:
-            axs = np.array([[axs]])
-        elif nrow == 1:
-            axs = axs.reshape(1, -1)
-        elif ncol == 1:
-            axs = axs.reshape(-1, 1)
-        angle_vals = np.asarray(out["angle_deg"].values, dtype=float)
-        angle_vals = np.nan_to_num(angle_vals, nan=0.0, posinf=0.0, neginf=0.0)
-        idx = 0
-        for c in metrics:
-            if c not in out.columns:
-                continue
-            ax = axs[idx // ncol, idx % ncol]
-            ax.plot(angle_vals, out[c].values, "o-", linewidth=2, markersize=6)
-            ax.set_xlabel("angle_deg")
-            ax.set_ylabel(c)
-            ax.set_title(c)
-            ax.grid(True, alpha=0.3)
-            idx += 1
-        for j in range(idx, nrow * ncol):
-            axs[j // ncol, j % ncol].set_visible(False)
-        fig.suptitle(
-            f"{title_prefix}Model={model_name or 'all'} | Size={size or 'all'} | {quality_param}={quality_val or 'all'}".strip(),
-            fontsize=10,
-        )
-        fig.tight_layout()
-        fig.savefig(save_path, dpi=150)
-        plt.close(fig)
-
-    return out
 
 
 # Artifact Saving Utilities
