@@ -24,7 +24,7 @@ class ImageCodecModel:
 
     SUPPORTED_CODECS = {'jpeg', 'webp', 'jpeg2000', 'jpegxl'}
 
-    def __init__(self, codec: str, q_level: int):
+    def __init__(self, codec: str, q_level: int = 1):
         self.codec = codec.lower()
         if self.codec not in self.SUPPORTED_CODECS:
             raise ValueError(
@@ -39,11 +39,13 @@ class ImageCodecModel:
         return int(np.linspace(20, 95, num=max_q)[q - 1])
 
     def __call__(self, x: torch.Tensor) -> dict:
-        """Compress and decompress input tensor, return dict with 'x_hat'."""
+        """Compress and decompress input tensor, return dict with 'x_hat' and 'bpp'."""
         img_u8 = self._tensor_to_uint8(x)
-        out_u8 = self._encode_decode(img_u8)
+        out_u8, nbytes = self._encode_decode(img_u8)
         x_hat = self._uint8_to_tensor(out_u8)
-        return {"x_hat": x_hat}
+        h, w = img_u8.shape[0], img_u8.shape[1]
+        bpp = 8.0 * nbytes / (h * w) if (h * w) > 0 else 0.0
+        return {"x_hat": x_hat, "bpp": bpp}
 
     def _tensor_to_uint8(self, x: torch.Tensor) -> np.ndarray:
         """Convert [1,3,H,W] tensor in [0,1] to uint8 HxWx3 array."""
@@ -57,8 +59,8 @@ class ImageCodecModel:
         out_f = out_u8.astype(np.float32) / 255.0
         return torch.from_numpy(out_f).permute(2, 0, 1).unsqueeze(0)
 
-    def _encode_decode(self, img_u8: np.ndarray) -> np.ndarray:
-        """Encode and decode image using the configured codec."""
+    def _encode_decode(self, img_u8: np.ndarray) -> tuple[np.ndarray, int]:
+        """Encode and decode image. Returns (decoded_image, nbytes_compressed)."""
         if self.codec == 'jpeg':
             return self._jpeg_roundtrip(img_u8)
         elif self.codec == 'webp':
@@ -69,32 +71,33 @@ class ImageCodecModel:
             return self._jpegxl_roundtrip(img_u8)
         raise ValueError(f"Unsupported codec: {self.codec}")
 
-    def _jpeg_roundtrip(self, img_u8: np.ndarray) -> np.ndarray:
+    def _jpeg_roundtrip(self, img_u8: np.ndarray) -> tuple[np.ndarray, int]:
         q_val = self._map_q_to_quality(self.q_level)
         buf = BytesIO()
         Image.fromarray(img_u8, mode='RGB').save(
             buf, format='JPEG', quality=q_val, subsampling=0, optimize=True
         )
+        nbytes = buf.getbuffer().nbytes
         buf.seek(0)
-        return np.array(Image.open(buf).convert('RGB'))
+        return np.array(Image.open(buf).convert('RGB')), nbytes
 
-    def _webp_roundtrip(self, img_u8: np.ndarray) -> np.ndarray:
+    def _webp_roundtrip(self, img_u8: np.ndarray) -> tuple[np.ndarray, int]:
         q_val = self._map_q_to_quality(self.q_level)
         buf = BytesIO()
         Image.fromarray(img_u8, mode='RGB').save(
             buf, format='WEBP', quality=q_val, method=6
         )
+        nbytes = buf.getbuffer().nbytes
         buf.seek(0)
-        return np.array(Image.open(buf).convert('RGB'))
+        return np.array(Image.open(buf).convert('RGB')), nbytes
 
-    def _jpeg2000_roundtrip(self, img_u8: np.ndarray) -> np.ndarray:
+    def _jpeg2000_roundtrip(self, img_u8: np.ndarray) -> tuple[np.ndarray, int]:
         psnr_list = [20.0, 24.0, 28.0, 32.0, 36.0, 40.0]
         cr_list = [500, 200, 100, 50, 25, 12]
         idx = min(max(self.q_level, 1), 6) - 1
         target_psnr = psnr_list[idx]
         cr = cr_list[idx]
 
-        # Try imagecodecs first
         if _ic is not None:
             try:
                 encoded = _ic.jpeg2k_encode(
@@ -103,11 +106,11 @@ class ImageCodecModel:
                     irreversible=True,
                     mct=1,
                 )
-                return _ic.jpeg2k_decode(encoded)
+                nbytes = len(encoded)
+                return _ic.jpeg2k_decode(encoded), nbytes
             except Exception:
                 pass
 
-        # Fallback to imageio
         tmp = np.ascontiguousarray(img_u8)
         with BytesIO() as buf:
             for writer_kwargs in [
@@ -118,26 +121,26 @@ class ImageCodecModel:
             ]:
                 try:
                     iio.imwrite(buf, tmp, extension='.jp2', **writer_kwargs)
+                    nbytes = buf.getbuffer().nbytes
                     buf.seek(0)
-                    return iio.imread(buf)
+                    return iio.imread(buf), nbytes
                 except Exception:
                     buf.seek(0)
                     buf.truncate()
         raise RuntimeError("JPEG2000 encoding failed with all backends")
 
-    def _jpegxl_roundtrip(self, img_u8: np.ndarray) -> np.ndarray:
+    def _jpegxl_roundtrip(self, img_u8: np.ndarray) -> tuple[np.ndarray, int]:
         dist_map = [4.0, 3.0, 2.0, 1.5, 1.0, 0.6]
         dist = dist_map[min(max(self.q_level, 1), 6) - 1]
 
-        # Try imagecodecs
         if _ic is not None:
             try:
                 encoded = _ic.jpegxl_encode(img_u8, distance=dist, effort=7)
-                return _ic.jpegxl_decode(encoded)
+                nbytes = len(encoded)
+                return _ic.jpegxl_decode(encoded), nbytes
             except Exception:
                 pass
 
-        # Try cjxl/djxl
         try:
             import subprocess as sp
             import tempfile as tf
@@ -152,23 +155,24 @@ class ImageCodecModel:
                     stdout=sp.DEVNULL,
                     stderr=sp.DEVNULL,
                 )
+                nbytes = os.path.getsize(jxl)
                 sp.run(
                     ['djxl', jxl, outp],
                     check=True,
                     stdout=sp.DEVNULL,
                     stderr=sp.DEVNULL,
                 )
-                return iio.imread(outp)
+                return iio.imread(outp), nbytes
         except Exception:
             pass
 
-        # Fallback to imageio
         with BytesIO() as buf:
             for kwargs in [{'distance': dist}, {}]:
                 try:
                     iio.imwrite(buf, img_u8, extension='.jxl', **kwargs)
+                    nbytes = buf.getbuffer().nbytes
                     buf.seek(0)
-                    return iio.imread(buf)
+                    return iio.imread(buf), nbytes
                 except Exception:
                     buf.seek(0)
                     buf.truncate()
@@ -323,141 +327,6 @@ def load_ftic_model(quality: int, device: torch.device, base_dir: str):
     return model
 
 
-class StableCodecWrapper:
-    """Wrapper for StableCodec to match CompressAI-style interface."""
-    
-    def __init__(self, stablecodec_model):
-        self.model = stablecodec_model
-    
-    def __call__(self, x: torch.Tensor) -> dict:
-        """
-        Compress and decompress input tensor.
-        """
-        # StableCodec expects input in range [-1, 1]
-        x_normalized = x * 2.0 - 1.0
-        
-        # Pad to multiple of 256
-        _, _, h, w = x.shape
-        pad_h = (256 - h % 256) % 256
-        pad_w = (256 - w % 256) % 256
-        
-        if pad_h > 0 or pad_w > 0:
-            import torch.nn.functional as F
-            x_padded = F.pad(x_normalized, (0, pad_w, 0, pad_h), mode='reflect')
-        else:
-            x_padded = x_normalized
-        
-        # Compress
-        with torch.no_grad():
-            output_dict = self.model.compress(x_padded)
-        
-        # Decompress
-        pos_prompt = [1]  # Dummy prompt
-        with torch.no_grad():
-            x_hat = self.model.decompress(
-                output_dict["strings"],
-                output_dict["shape"],
-                pos_prompt
-            )
-        
-        # Crop to original size
-        x_hat = x_hat[:, :, :h, :w]
-        
-        # Convert from [-1, 1] to [0, 1]
-        x_hat = (x_hat + 1.0) / 2.0
-        x_hat = torch.clamp(x_hat, 0.0, 1.0)
-        
-        # Clean up CUDA cache to prevent OOM
-        if x.is_cuda:
-            torch.cuda.empty_cache()
-        
-        return {"x_hat": x_hat}
-
-
-def load_stablecodec_model(quality: int, device: torch.device, base_dir: str):
-    """
-    Load StableCodec model (ICCV 2025).
-    """
-    base_dir_p = Path(base_dir).expanduser()
-    stablecodec_path = (base_dir_p / "StableCodec").resolve()
-    sd_turbo_path = (base_dir_p / "sd-turbo").resolve()
-    
-    # Map quality to checkpoint
-    checkpoint_map = {
-        1: "stablecodec_ft2.pkl",   # ~0.035 bpp
-        2: "stablecodec_ft4.pkl",   # ~0.025 bpp
-        3: "stablecodec_ft8.pkl",   # ~0.017 bpp
-        4: "stablecodec_ft12.pkl",  # ~0.013 bpp
-        5: "stablecodec_ft16.pkl",  # ~0.010 bpp
-        6: "stablecodec_ft32.pkl",  # ~0.005 bpp
-    }
-    
-    if quality not in checkpoint_map:
-        raise ValueError(f"Quality {quality} not in {list(checkpoint_map.keys())}")
-    
-    # Check paths
-    ckpt_path = stablecodec_path / "checkpoints" / checkpoint_map[quality]
-    elic_path = stablecodec_path / "checkpoints" / "elic_official.pth"
-    
-    if not ckpt_path.exists():
-        raise FileNotFoundError(f"StableCodec checkpoint not found: {ckpt_path}")
-    if not elic_path.exists():
-        raise FileNotFoundError(f"ELIC checkpoint not found: {elic_path}")
-    if not sd_turbo_path.exists():
-        raise FileNotFoundError(f"SD-Turbo not found: {sd_turbo_path}")
-    
-    stablecodec_path_s = str(stablecodec_path / "src")
-    stablecodec_root = str(stablecodec_path)
-    
-    try:
-        modules_to_remove = []
-        for k in list(sys.modules.keys()):
-            if any(k.startswith(prefix) for prefix in ["model", "latent_codec", "StableCodec", "ELIC", "my_utils"]):
-                mod = sys.modules[k]
-                mod_file = getattr(mod, "__file__", None)
-                if mod_file and stablecodec_path_s not in mod_file and stablecodec_root not in mod_file:
-                    modules_to_remove.append(k)
-        for k in modules_to_remove:
-            del sys.modules[k]
-    except Exception:
-        pass
-    
-    if stablecodec_path_s in sys.path:
-        sys.path.remove(stablecodec_path_s)
-    sys.path.insert(0, stablecodec_path_s)
-    
-    if stablecodec_root in sys.path:
-        sys.path.remove(stablecodec_root)
-    sys.path.insert(0, stablecodec_root)
-    
-    from StableCodec import StableCodec
-    
-    class Args:
-        def __init__(self):
-            self.codec_path = str(ckpt_path)
-            self.elic_path = str(elic_path)
-            self.lambda_rate = quality  # Not used during inference
-            self.pos_prompt = "high quality, sharp, detailed"
-            self.latent_tiled_size = 96
-            self.latent_tiled_overlap = 32
-            self.vae_encoder_tiled_size = 256
-            self.vae_decoder_tiled_size = 256
-            self.lora_rank_vae = 16  # Must match checkpoint
-            self.lora_rank_unet = 32  # Must match checkpoint
-    
-    args = Args()
-    
-    print(f"[StableCodec] Loading quality level {quality} ({checkpoint_map[quality]})...")
-    model = StableCodec(sd_path=str(sd_turbo_path), args=args)
-    model.to(device).eval()
-    model.codec.update(force=True)
-    for param in model.parameters():
-        param.requires_grad = False
-    print("[StableCodec] Model loaded successfully!")
-    
-    return StableCodecWrapper(model)
-
-
 def load_model(
     model_name: str,
     quality: int,
@@ -469,11 +338,11 @@ def load_model(
     Universal model loader for NIC and traditional codecs.
 
     Args:
-        model_name: 'stablecodec', 'flic', 'tcm', CompressAI model name, or codec ('jpeg', 'webp', 'jpegxl', 'jpeg2000')
+        model_name: 'ftic', 'tcm', CompressAI model name, or codec ('jpeg', 'webp', 'jpegxl', 'jpeg2000')
         quality: Quality level (1-6 for most models)
         device: torch device
         p: TCM-specific parameter (64 or 128)
-        base_dir: Base directory for StableCodec/FTIC/TCM checkpoints
+        base_dir: Base directory for FTIC/TCM checkpoints
     """
     name = model_name.lower()
 
@@ -487,10 +356,6 @@ def load_model(
         if base_dir is None:
             base_dir = str(Path(__file__).resolve().parents[1] / "third_party")
         return load_ftic_model(quality, device, base_dir)
-    elif name == 'stablecodec':
-        if base_dir is None:
-            base_dir = str(Path(__file__).resolve().parents[1] / "third_party")
-        return load_stablecodec_model(quality, device, base_dir)
     else:
         return load_compressai_model(model_name, quality, device)
 
@@ -508,7 +373,6 @@ def get_available_models(include_codecs: bool = True) -> list:
     except ImportError:
         available = []
 
-    # models = ['stablecodec', 'ftic', 'tcm'] + available
     models = ['ftic', 'tcm'] + available
     if include_codecs:
         # jpeg2000 is often problematic / flaky across environments
