@@ -10,7 +10,7 @@ Distortion types per model:
   4. Quantization — reduce bit depth (6, 4, 3, 2 bits)
   5. JPEG re-compression at low quality (q = 10, 30, 50, 70)
 
-Metric: L(X, X̂) = Σ ρ(f)·L(f) / Σ L(f),  ρ(f) = D_f / (S_f + D_f) ∈ [0,1]
+Metric: L̃(X, X̂) = (1/N) Σ ρ(f)·L_k(f),  ρ(f) = D_f / (S_f + D_f) ∈ [0,1]
 
 Usage:
     python run_comprehensive_eval.py --single   # 1 image, 1 model (quick test)
@@ -100,13 +100,33 @@ def setup_logging(out_dir: Path):
 # ═══════════════════════════════════════════════════════════════════════
 # Core metric
 # ═══════════════════════════════════════════════════════════════════════
-def compute_Le(orig_gray: np.ndarray, recon_gray: np.ndarray, L_k: np.ndarray) -> float:
-    """Spectral Leakage Coupling: L̃ = (1/N) Σ ρ(f)·L_k(f), ρ = D/(S+D)."""
-    _, S_f, _ = compute_radial_spectrum(orig_gray, num_bins=NUM_BINS)
+def compute_Le(
+    orig_gray: np.ndarray, recon_gray: np.ndarray, L_k: np.ndarray,
+) -> tuple[float, float]:
+    """Spectral Leakage Coupling: L̃ = (1/N) Σ ρ(f)·L_k(f), ρ = D/(S+D).
+
+    L_k (1-D DCT frequency profile, length n) is linearly interpolated
+    onto the 2-D radial frequency grid so that physical frequencies are
+    aligned.  The radial grid spans [0, √2·(n−1)], so bins beyond the
+    1-D Nyquist index are clamped to L_k[n−1].
+
+    Returns (Le, rho_bar):
+        Le       – spectral leakage coupling (weighted by L_k).
+        rho_bar  – mean distortion fraction (ablation baseline: L_k ≡ 1).
+    """
+    freqs, S_f, _ = compute_radial_spectrum(orig_gray, num_bins=NUM_BINS)
     _, D_f, _ = compute_radial_distortion(orig_gray, recon_gray, num_bins=NUM_BINS)
-    n = min(len(S_f), len(L_k), len(D_f))
-    rho = D_f[:n] / (S_f[:n] + D_f[:n] + eps)
-    return float(np.mean(rho * L_k[:n]))
+    rho = D_f / (S_f + D_f + eps)
+
+    # Map L_k from 1-D indices [0 .. n-1] onto the radial-frequency
+    # centres.  np.interp clamps beyond the domain, so radial freqs
+    # exceeding n-1 receive L_k[n-1] (conservative upper bound).
+    k_axis = np.arange(len(L_k), dtype=np.float64)
+    L_k_radial = np.interp(freqs, k_axis, L_k)
+
+    Le = float(np.mean(rho * L_k_radial))
+    rho_bar = float(np.mean(rho))
+    return Le, rho_bar
 
 
 def psnr_db(x: torch.Tensor, y: torch.Tensor) -> float:
@@ -219,9 +239,9 @@ def evaluate_image(img_path, model, model_name, L_k, is_trad, logger, save_dir=N
 
     def rec(dist_type, param, x_hat_cpu):
         p = psnr_db(x_hat_cpu, x_cpu)
-        le = compute_Le(orig_gray, to_gray_np(x_hat_cpu), L_k)
+        le, rho_b = compute_Le(orig_gray, to_gray_np(x_hat_cpu), L_k)
         rows.append(dict(model=model_name, image=stem, distortion=dist_type,
-                         param=str(param), psnr=p, Le=le))
+                         param=str(param), psnr=p, Le=le, rho_bar=rho_b))
         if save_dir:
             tag = f"{dist_type}_{param}".replace(".", "p")
             save_img(x_hat_cpu, save_dir / model_name / stem / f"{tag}.png")
@@ -282,6 +302,21 @@ DIST_MARKERS = {
     "codec_clean": "s", "codec+gauss": "o", "gauss_only": "^",
     "quantization": "D", "jpeg_recomp": "P",
 }
+
+# Paper fig: (xytext offset points, ha, va) so labels stay inside and don't overlap
+PAPER_LABEL_OFFSETS = {
+    "bmshj2018-factorized": ((5, 0), "left", "center"),   # справа
+    "cheng2020-attn": ((4, -5), "left", "top"),
+    "bmshj2018-hyperprior": ((5, 0), "left", "center"),   # справа
+    "cheng2020-anchor": ((4, 3), "left", "bottom"),
+    "mbt2018-mean": ((7, 0), "left", "center"),           # справа, чуть правее
+    "mbt2018": ((4, -4), "left", "top"),
+    "ftic": ((-6, 1), "right", "top"),                     # еще чуть выше
+    "tcm": ((6, -1), "left", "top"),                   # пониже и правее
+    "jpegxl": ((4, 5), "left", "bottom"),                  # сверху, чуть вправо
+    "webp": ((-5, -4), "right", "top"),
+    "jpeg": ((4, 2), "left", "bottom"),
+}
 DIST_LABELS = {
     "codec_clean": "Codec (clean)", "codec+gauss": "Codec + Gaussian",
     "gauss_only": "Gaussian only", "quantization": "Quantization",
@@ -325,9 +360,13 @@ def make_figures(df: pd.DataFrame, out_dir: Path, logger):
     # ════════════════════════════════════════════════════════════════════
     # Fig 2: Model-level means (clean codec) — bar chart
     # ════════════════════════════════════════════════════════════════════
-    mm = df_clean.groupby("model").agg(
+    has_rho = "rho_bar" in df_clean.columns
+    agg_dict = dict(
         psnr_m=("psnr", "mean"), psnr_s=("psnr", "std"),
-        Le_m=("Le", "mean"), Le_s=("Le", "std")).reset_index()
+        Le_m=("Le", "mean"), Le_s=("Le", "std"))
+    if has_rho:
+        agg_dict.update(rho_m=("rho_bar", "mean"), rho_s=("rho_bar", "std"))
+    mm = df_clean.groupby("model").agg(**agg_dict).reset_index()
     mm = mm.sort_values("psnr_m", ascending=False)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
@@ -516,6 +555,82 @@ def make_figures(df: pd.DataFrame, out_dir: Path, logger):
     fig.savefig(out_dir / "fig7_model_scatter.png", dpi=300)
     plt.close(fig)
     logger.info("  fig7_model_scatter — model-level means correlation")
+
+    # ════════════════════════════════════════════════════════════════════
+    # Fig for paper: weighted leakage result (single-column, clean)
+    # ════════════════════════════════════════════════════════════════════
+    fig, ax = plt.subplots(figsize=(3.5, 3.2))
+    for _, r in mm.iterrows():
+        m = r["model"]
+        ax.scatter(r["psnr_m"], r["Le_m"],
+                  c=MODEL_COLORS.get(m, "gray"), marker=MODEL_MARKERS.get(m, "o"),
+                  s=72, edgecolors="black", lw=0.5, zorder=5)
+        off, ha, va = PAPER_LABEL_OFFSETS.get(m, ((4, 4), "left", "bottom"))
+        ax.annotate(m, (r["psnr_m"], r["Le_m"]), fontsize=6,
+                    xytext=off, textcoords="offset points", ha=ha, va=va,
+                    clip_on=True)
+    rs_m, _ = spearmanr(mm["psnr_m"], mm["Le_m"])
+    rp_m, _ = pearsonr(mm["psnr_m"], mm["Le_m"])
+    ax.set_xlabel("Mean PSNR (dB)", fontsize=10)
+    ax.set_ylabel(r"Mean $\tilde{\mathcal{L}}(X, \hat{X})$", fontsize=10)
+    ax.set_title(r"Spearman $\rho_s$=%s, Pearson $r$=%s" % (f"{rs_m:.3f}", f"{rp_m:.3f}"), fontsize=9)
+    ax.grid(True, ls=":", lw=0.3, alpha=0.5)
+    ax.set_xlim(34.8, 43.2)
+    ax.set_ylim(-0.01, 0.155)
+    fig.tight_layout()
+    fig.savefig(out_dir / "fig_weighted_leakage_paper.pdf", dpi=300)
+    plt.close(fig)
+    logger.info("  fig_weighted_leakage_paper — for paper (single-column)")
+
+    # ════════════════════════════════════════════════════════════════════
+    # Ablation: tilde-L (with L_k) vs rho_bar (without L_k)
+    # ════════════════════════════════════════════════════════════════════
+    if has_rho and len(mm) >= 3:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.5))
+        for _, r in mm.iterrows():
+            m = r["model"]
+            c = MODEL_COLORS.get(m, "gray")
+            mk = MODEL_MARKERS.get(m, "o")
+            ax1.scatter(r["psnr_m"], r["Le_m"], c=c, marker=mk,
+                        s=80, edgecolors="black", lw=0.5, zorder=5)
+            ax1.annotate(m, (r["psnr_m"], r["Le_m"]), fontsize=6,
+                         xytext=(5, 4), textcoords="offset points")
+            ax2.scatter(r["psnr_m"], r["rho_m"], c=c, marker=mk,
+                        s=80, edgecolors="black", lw=0.5, zorder=5)
+            ax2.annotate(m, (r["psnr_m"], r["rho_m"]), fontsize=6,
+                         xytext=(5, 4), textcoords="offset points")
+
+        rs_le, _ = spearmanr(mm["psnr_m"], mm["Le_m"])
+        rp_le, _ = pearsonr(mm["psnr_m"], mm["Le_m"])
+        rs_rho, _ = spearmanr(mm["psnr_m"], mm["rho_m"])
+        rp_rho, _ = pearsonr(mm["psnr_m"], mm["rho_m"])
+
+        ax1.set_xlabel("Mean PSNR (dB)")
+        ax1.set_ylabel(r"$\tilde{\mathcal{L}}(X,\hat{X})$")
+        ax1.set_title(
+            r"With $L_k$ weighting" "\n"
+            f"Spearman $\\rho_s$={rs_le:.3f}, Pearson $r$={rp_le:.3f}",
+            fontsize=9)
+        ax1.grid(True, ls=":", lw=0.3, alpha=0.5)
+
+        ax2.set_xlabel("Mean PSNR (dB)")
+        ax2.set_ylabel(r"$\bar{\rho}$  (mean distortion fraction)")
+        ax2.set_title(
+            r"Without $L_k$ weighting ($L_k \equiv 1$)" "\n"
+            f"Spearman $\\rho_s$={rs_rho:.3f}, Pearson $r$={rp_rho:.3f}",
+            fontsize=9)
+        ax2.grid(True, ls=":", lw=0.3, alpha=0.5)
+
+        fig.suptitle(
+            r"Ablation: contribution of $L_k$ to codec discrimination"
+            f" ({n_img} Kodak, $q={QUALITY}$)", fontsize=11)
+        fig.tight_layout()
+        fig.savefig(out_dir / "fig_ablation_Lk.pdf", dpi=300)
+        fig.savefig(out_dir / "fig_ablation_Lk.png", dpi=300)
+        plt.close(fig)
+        logger.info(
+            f"  fig_ablation_Lk — Le Spearman={rs_le:.3f} vs "
+            f"rho_bar Spearman={rs_rho:.3f}")
 
 
 def generate_latex_table(df: pd.DataFrame, out_dir: Path, logger):
@@ -712,6 +827,7 @@ def main():
     logger.info(f"{'Model':<25s} {'PSNR (dB)':>12s}  {'L(X,X̂)':>12s}  {'n':>4s}")
     logger.info(f"{'-'*70}")
 
+    has_rho = "rho_bar" in df_clean.columns
     mm = df_clean.groupby("model").agg(
         pm=("psnr", "mean"), ps=("psnr", "std"),
         lm=("Le", "mean"), ls_=("Le", "std"),
@@ -726,6 +842,14 @@ def main():
     logger.info(f"\nCorrelation (clean codec, N={len(df_clean)}):")
     logger.info(f"  Spearman ρ = {rho_s:.4f}")
     logger.info(f"  Pearson  r = {rho_p:.4f}")
+
+    if has_rho:
+        rho_s_abl, _ = spearmanr(df_clean["psnr"], df_clean["rho_bar"])
+        rho_p_abl, _ = pearsonr(df_clean["psnr"], df_clean["rho_bar"])
+        logger.info(f"\nAblation — ρ̄ (without L_k weighting):")
+        logger.info(f"  Spearman ρ = {rho_s_abl:.4f}")
+        logger.info(f"  Pearson  r = {rho_p_abl:.4f}")
+        logger.info(f"  ΔSpearman (Le − ρ̄) = {rho_s - rho_s_abl:+.4f}")
 
     # Distortion consistency for reference model
     ref = "cheng2020-anchor"
