@@ -17,6 +17,8 @@ from .functions import (
     build_dct_matrix,
     compute_leakage_loss_from_reconstruction,
     make_dct_basis_rgb_normalized,
+    compute_radial_spectrum,
+    compute_radial_distortion,
 )
 
 from .loaders import (
@@ -53,6 +55,8 @@ __all__ = [
     "build_dct_matrix",
     "compute_leakage_loss_from_reconstruction",
     "make_dct_basis_rgb_normalized",
+    "compute_radial_spectrum",
+    "compute_radial_distortion",
     # loaders
     "load_model",
     "load_compressai_model",
