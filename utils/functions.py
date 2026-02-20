@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from scipy.fft import dct, idct
+from scipy.fft import dct, dctn, idct
 
 
 def compute_dct_smearing_metrics(
@@ -428,6 +428,68 @@ def evaluate_frequency_response(
     return x_dct_rgb, x_hat, avg_metrics
 
 
+# ---------------------------------------------------------------------------
+# Radial spectrum utilities  (2D DCT -> isocircle binning -> 1D)
+# ---------------------------------------------------------------------------
+
+def compute_radial_spectrum(
+    image_gray: np.ndarray,
+    num_bins: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute 1D radial power spectrum from 2D DCT-II.
+
+    Given y = DCT2(x), coefficient y[i,j] has radial frequency
+    f = sqrt(i^2 + j^2).  All (i,j) on the same circle share the
+    same frequency.  Binning |y[i,j]|^2 by concentric rings gives
+    a 1D spectral profile S(f).
+
+    Args:
+        image_gray: (H, W) grayscale image or patch.
+        num_bins:   Number of radial bins (default: min(H, W)).
+
+    Returns:
+        freqs:    (num_bins,) bin centres (radial frequency).
+        spectrum: (num_bins,) mean |Y[i,j]|^2 per ring.
+        counts:   (num_bins,) number of DCT coefficients per ring.
+    """
+    if image_gray.ndim != 2:
+        raise ValueError("image_gray must be a 2-D array")
+    H, W = image_gray.shape
+    if num_bins is None:
+        num_bins = min(H, W)
+
+    Y = dctn(image_gray.astype(np.float64), norm="ortho")
+    power = Y ** 2
+
+    fi = np.arange(H, dtype=np.float64).reshape(-1, 1)
+    fj = np.arange(W, dtype=np.float64).reshape(1, -1)
+    radius = np.sqrt(fi ** 2 + fj ** 2)
+
+    bin_edges = np.linspace(0.0, radius.max() + 1e-9, num_bins + 1)
+    bin_idx = np.digitize(radius, bin_edges) - 1
+    bin_idx = np.clip(bin_idx, 0, num_bins - 1)
+
+    spectrum = np.zeros(num_bins, dtype=np.float64)
+    counts = np.zeros(num_bins, dtype=np.float64)
+    for b in range(num_bins):
+        mask = bin_idx == b
+        if mask.any():
+            spectrum[b] = power[mask].mean()
+            counts[b] = float(mask.sum())
+
+    freqs = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    return freqs, spectrum, counts
+
+
+def compute_radial_distortion(
+    orig_gray: np.ndarray,
+    recon_gray: np.ndarray,
+    num_bins: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Radial power spectrum of the distortion signal (orig - recon)."""
+    return compute_radial_spectrum(orig_gray - recon_gray, num_bins)
+
+
 # CSV and Results Utilities
 def build_row_key(row: dict, df_columns: list = None) -> str:
     """Build unique key for a results row (Model|Size|q:X or p:X)."""
@@ -676,9 +738,15 @@ def save_all_artifacts(
     metrics: dict,
     dpi: int = 150,
 ):
-    """Save all experiment artifacts (images + plots)."""
+    """Save all experiment artifacts (images + plots + numpy arrays)."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     save_experiment_images(output_dir, x_dct_rgb, x_hat)
     save_metrics_plots(output_dir, metrics, dpi=dpi)
+    if 'leakage' in metrics:
+        np.save(output_dir / 'leakage_vector.npy', metrics['leakage'])
+    if 'R' in metrics:
+        np.save(output_dir / 'R_matrix.npy', metrics['R'])
 
 
 # ---------------------------------------------------------------------------
