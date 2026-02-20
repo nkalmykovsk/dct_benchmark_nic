@@ -414,31 +414,43 @@ def plot_leakage_vs_angle(all_results: dict[str, dict], out_path: Path):
 # ---------------------------------------------------------------------------
 
 MODEL_CONFIG = {
-    "tcm": {"uses_p": True, "p": 128},
+    "tcm": {"uses_p": True, "p_values": [64, 128]},
 }
 
 
 def run_model(name: str, quality: int, device, size: int,
               angles: list[float], base_out: Path):
+    """Run a single model. For TCM, runs all configured p values."""
     cfg = MODEL_CONFIG.get(name, {})
+
     if cfg.get("uses_p"):
-        p_val = cfg["p"]
-        model = load_model(name, 1, device, p=p_val,
-                           base_dir=str(Path(__file__).resolve().parent / "third_party"))
-        q_param, p_param, q_tag = None, p_val, f"p_{p_val}"
+        # TCM: iterate over all p values
+        all_res, all_dfs = {}, []
+        for p_val in cfg["p_values"]:
+            print(f"  (p={p_val})")
+            model = load_model(name, 1, device, p=p_val,
+                               base_dir=str(Path(__file__).resolve().parent / "third_party"))
+            model_dir = base_out / name / str(size) / f"p_{p_val}"
+            res = measure_directional_leakage(
+                model, size=size, angles=angles,
+                device=str(device), model_name=name,
+                save_images=True, out_dir=model_dir,
+            )
+            all_res[p_val] = res
+            all_dfs.append(results_to_dataframe(res, name, size, p=p_val))
+        # return last p_val results for summary, all dfs for CSV
+        return res, pd.concat(all_dfs, ignore_index=True)
     else:
         model = load_model(name, quality, device,
                            base_dir=str(Path(__file__).resolve().parent / "third_party"))
-        q_param, p_param, q_tag = quality, None, f"q_{quality}"
-
-    model_dir = base_out / name / str(size) / q_tag
-
-    res = measure_directional_leakage(
-        model, size=size, angles=angles,
-        device=str(device), model_name=name,
-        save_images=True, out_dir=model_dir,
-    )
-    return res, results_to_dataframe(res, name, size, quality=q_param, p=p_param)
+        q_param, q_tag = quality, f"q_{quality}"
+        model_dir = base_out / name / str(size) / q_tag
+        res = measure_directional_leakage(
+            model, size=size, angles=angles,
+            device=str(device), model_name=name,
+            save_images=True, out_dir=model_dir,
+        )
+        return res, results_to_dataframe(res, name, size, quality=q_param)
 
 
 def main():
@@ -481,7 +493,16 @@ def main():
     all_dfs = [results_to_dataframe(id_res, "identity", args.size)]
 
     # ---- 1) Test each codec --------------------------------------------------
+    tcm_done = set()  # track (model, size) for p-based models to avoid repeats
     for i, name in enumerate(models, 1):
+        cfg = MODEL_CONFIG.get(name, {})
+        if cfg.get("uses_p"):
+            key = (name, args.size)
+            if key in tcm_done:
+                print(f"\n[{i}/{len(models)}] {name} — skip (p-based, already done for this size)")
+                continue
+            tcm_done.add(key)
+
         print(f"\n[{i}/{len(models)}] {name}")
         print("-" * 50)
         try:
@@ -492,11 +513,19 @@ def main():
         except Exception as exc:
             print(f"  FAILED: {exc}")
 
-    # ---- 2) CSV --------------------------------------------------------------
-    df_all = pd.concat(all_dfs, ignore_index=True)
+    # ---- 2) CSV (append to existing, deduplicate) ----------------------------
+    df_new = pd.concat(all_dfs, ignore_index=True)
     csv_path = out_dir / "directional_leakage.csv"
+    if csv_path.exists():
+        df_old = pd.read_csv(csv_path)
+        df_all = pd.concat([df_old, df_new], ignore_index=True)
+        key_cols = [c for c in ["model", "size", "angle_deg", "q", "p"]
+                    if c in df_all.columns]
+        df_all = df_all.drop_duplicates(subset=key_cols, keep="last")
+    else:
+        df_all = df_new
     df_all.to_csv(csv_path, index=False)
-    print(f"\nCSV  -> {csv_path}")
+    print(f"\nCSV  -> {csv_path}  ({len(df_all)} rows)")
 
     # ---- 3) Global plots -----------------------------------------------------
     plot_leakage_polar(all_results, out_dir / "polar_leakage.png")
