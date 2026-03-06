@@ -221,6 +221,7 @@ dct_benchmark_nic/
 │   ├── run_directional.py     # Directional leakage → results/directional/
 │   ├── run_finetune.py        # Fine-tuning demo → results/finetune/
 │   ├── plot_fig3_grid.py      # Fig. 3: DCT response grid (11 codecs × 2 quality)
+│   ├── plot_fig4b_artifact.py # Fig. 4b: 1024×1024 reconstruction artifact
 │   └── plot_distortion_consistency.py  # Fig. S2: L̃ consistency
 ├── notebooks/
 │   ├── 01_demo.ipynb      # Interactive demo and exploration
