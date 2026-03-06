@@ -42,8 +42,8 @@ def _pad_for_model(x: torch.Tensor, model_name: str) -> tuple[torch.Tensor, int,
     else:
         return x, 0, 0
 
-    th = max(256, -(-H // mult) * mult) if tag in compressai_models else -(-H // mult) * mult
-    tw = max(256, -(-W // mult) * mult) if tag in compressai_models else -(-W // mult) * mult
+    th = -(-H // mult) * mult
+    tw = -(-W // mult) * mult
     ph, pw = th - H, tw - W
     if ph or pw:
         x = F.pad(x, (0, pw, 0, ph), value=0.0)
