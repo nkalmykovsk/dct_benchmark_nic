@@ -1,0 +1,11 @@
+torch>=2.0
+torchvision>=0.15
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+pandas>=2.0
+pillow>=9.0
+imageio>=2.31
+compressai>=1.2
+lpips>=0.1.4
+pytorch-msssim>=1.0
