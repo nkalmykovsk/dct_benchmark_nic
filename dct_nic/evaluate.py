@@ -13,7 +13,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn.functional as F
 
 from .metrics import build_dct_basis_rgb, compute_response_matrix, all_metrics
 
@@ -25,51 +24,32 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # Single-model evaluation
 # ---------------------------------------------------------------------------
 
-def _pad_for_model(x: torch.Tensor, model_name: str) -> tuple[torch.Tensor, int, int]:
-    """Pad tensor to model-required stride."""
-    _, _, H, W = x.shape
-    tag = model_name.lower()
-    compressai_models = {
-        "cheng2020-anchor", "cheng2020-attn", "bmshj2018-hyperprior",
-        "bmshj2018-factorized", "mbt2018-mean", "mbt2018",
-    }
-    if tag == "ftic":
-        mult = 256
-    elif tag == "tcm":
-        mult = 128
-    elif tag in compressai_models:
-        mult = 64
-    else:
-        return x, 0, 0
-
-    th = -(-H // mult) * mult
-    tw = -(-W // mult) * mult
-    ph, pw = th - H, tw - W
-    if ph or pw:
-        x = F.pad(x, (0, pw, 0, ph), value=0.0)
-    return x, ph, pw
+MIN_SIZE = {"ftic": 256, "tcm": 256}
 
 
 def _model_forward(model, x: torch.Tensor, model_name: str = "") -> tuple[torch.Tensor, float | None]:
     """Run one codec forward pass; return (x_hat, bpp)."""
-    x_pad, ph, pw = _pad_for_model(x, model_name)
-    _, _, H_orig, W_orig = x.shape
+    _, _, H, W = x.shape
+    tag = model_name.lower()
+    req = MIN_SIZE.get(tag, 0)
+    if req and (H < req or W < req):
+        raise ValueError(
+            f"{model_name} requires input >= {req}×{req}, got {H}×{W}"
+        )
 
     with torch.no_grad():
-        out = model(x_pad)
+        out = model(x)
 
     if not isinstance(out, dict) or "x_hat" not in out:
         raise TypeError("model(x) must return dict with key 'x_hat'")
 
     x_hat = out["x_hat"].detach().cpu()
-    if ph or pw:
-        x_hat = x_hat[:, :, :H_orig, :W_orig]
 
     bpp = None
     if "bpp" in out and out["bpp"] is not None:
         bpp = float(out["bpp"])
     elif "likelihoods" in out:
-        num_pixels = H_orig * W_orig
+        num_pixels = H * W
         bpp = sum(
             (-torch.log2(lk.clamp(min=1e-9))).sum().item()
             for lk in out["likelihoods"].values()
@@ -98,7 +78,7 @@ def evaluate_codec(
                     this interface.
         size:       DCT basis dimension n.
         device:     PyTorch device string or object.
-        model_name: Used for architecture-specific padding (optional).
+        model_name: Used for minimum-size validation (FTIC/TCM ≥ 256).
         num_runs:   Number of forward passes to average (for stochastic codecs).
 
     Returns:

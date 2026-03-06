@@ -23,7 +23,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn.functional as F
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -40,41 +39,21 @@ GAUSS_SIGMAS = [0.01, 0.03, 0.05, 0.10, 0.20]
 QUANT_BITS = [6, 4, 3, 2]
 JPEG_QUALITIES = [10, 30, 50, 70]
 
-COMPRESSAI_PAD_MULT = 64
-PAD_MULT = {"ftic": 256, "tcm": 128}
-
-
 def load_image_tensor(path: Path, device: torch.device) -> torch.Tensor:
     """Load image as [1, 3, H, W] float32 tensor in [0, 1]."""
     img = np.array(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
     return torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0).to(device)
 
 
-def pad_for_codec(x: torch.Tensor, model_name: str) -> tuple[torch.Tensor, int, int]:
-    """Pad to codec stride. Returns (padded, pad_h, pad_w)."""
-    _, _, H, W = x.shape
-    mult = PAD_MULT.get(model_name, COMPRESSAI_PAD_MULT)
-    th = -(-H // mult) * mult
-    tw = -(-W // mult) * mult
-    if model_name not in PAD_MULT:
-        th, tw = max(256, th), max(256, tw)
-    ph, pw = th - H, tw - W
-    if ph or pw:
-        x = F.pad(x, (0, pw, 0, ph), value=0.0)
-    return x, ph, pw
-
-
 def codec_roundtrip(model, x: torch.Tensor, model_name: str) -> torch.Tensor:
     """Compress–decompress; return [1, 3, H, W] in [0, 1] on CPU."""
-    _, _, H, W = x.shape
     is_trad = model_name in {"jpeg", "webp", "jpegxl"}
     if is_trad:
         out = model(x)
-        return out["x_hat"][:, :, :H, :W].clamp(0, 1).cpu()
-    x_pad, ph, pw = pad_for_codec(x, model_name)
-    with torch.no_grad():
-        out = model(x_pad)
-    return out["x_hat"][:, :, :H, :W].clamp(0, 1).cpu()
+    else:
+        with torch.no_grad():
+            out = model(x)
+    return out["x_hat"].clamp(0, 1).cpu()
 
 
 def psnr_db(x: torch.Tensor, y: torch.Tensor) -> float:
