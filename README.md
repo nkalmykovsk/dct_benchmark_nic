@@ -14,13 +14,6 @@
 Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix — where each spatial position encodes a unique frequency pair — we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
 
 <p align="center">
-  <img src="paper/figures/overview_3d_median_leak_allmodels.png" alt="3D overview of median frequency leakage" width="90%">
-</p>
-<p align="center">
-  <em>Median frequency leakage L<sub>k</sub> (↓ better) across quality levels and image sizes for 11 codecs.</em>
-</p>
-
-<p align="center">
   <img src="paper/figures/fig3_dct_response_grid.png" alt="DCT grid response for 11 codecs" width="100%">
 </p>
 
