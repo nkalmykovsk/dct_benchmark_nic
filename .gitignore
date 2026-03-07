@@ -1,5 +1,35 @@
+# Python
 __pycache__/
-images/
-third_party/
-results/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environments
 env/
+.venv/
+venv/
+
+# Model checkpoints (large binaries)
+*.pth
+*.pth.tar
+*.ckpt
+
+# Third-party repos (clone separately, see README)
+third_party/
+
+# Data
+data/kodak/
+kodak/
+
+# IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
