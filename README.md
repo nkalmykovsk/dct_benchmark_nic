@@ -5,11 +5,38 @@
 > **DCT Basis Benchmarks for Neural Image Compression**  
 > Kalmykov N.I., Varetsa M.S., Dibo R., Xu Z., Liu Y., Oseledets I., Phan A.-H.  
 
+<table>
+<tr>
+  <td align="center"><b>Original</b></td>
+  <td align="center"><b>ChengAnchor q=6</b></td>
+</tr>
+<tr>
+  <td><img src="paper/div2k_clic_examples_crop/0769.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0769.png" width="280"></td>
+</tr>
+<tr>
+  <td><img src="paper/div2k_clic_examples_crop/0772.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0772.png" width="280"></td>
+</tr>
+<tr>
+  <td><img src="paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/26f350af0f6ee2fb314606ebc2b56e56.png" width="280"></td>
+</tr>
+</table>
+<p align="center"><em>Original (center crop) → ChengAnchor q=6 — 768×512 / 512×768</em></p>
+
 ---
 
 ## What this benchmark does
 
-Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix, where each spatial position encodes a unique frequency pair, we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
+Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix - where each spatial position encodes a unique frequency pair - we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
+
+<p align="center">
+  <img src="paper/figures/overview_3d_median_leak_allmodels.png" alt="3D overview of median frequency leakage" width="90%">
+</p>
+<p align="center">
+  <em>Median frequency leakage L<sub>k</sub> (↓ better) across quality levels and image sizes for 11 codecs.</em>
+</p>
 
 <p align="center">
   <img src="paper/figures/fig3_dct_response_grid.png" alt="DCT grid response for 11 codecs" width="100%">
@@ -18,7 +45,7 @@ Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality bu
 **Key finding:** Neural image codecs suppress up to **94% of their distortion** in high-frequency bands, while classical codecs (JPEG, JPEG XL, WebP) remain spectrally uniform.
 
 <p align="center">
-  <img src="paper/figures/fig_leakage_vs_bpp_256.png" alt="Rate-leakage comparison at 256×256" width="80%">
+  <img src="paper/figures/fig_leakage_vs_bpp_256.png" alt="Rate-leakage comparison at 256×256" width="60%">
 </p>
 
 <p align="center">
