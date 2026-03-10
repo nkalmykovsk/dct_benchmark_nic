@@ -3,7 +3,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 
 > **DCT Basis Benchmarks for Neural Image Compression**  
-> Kalmykov N.I., Varetsa M.S., Dibo R., Xu Z., Liu Y., Oseledets I., Phan A.-H.  
+> Kalmykov N.I., Varetsa M.S., Dibo R., Liu Y., Oseledets I., Phan A.-H.  
 
 ---
 
