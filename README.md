@@ -18,7 +18,7 @@ Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality bu
 **Key finding:** Neural image codecs suppress up to **94% of their distortion** in high-frequency bands, while classical codecs (JPEG, JPEG XL, WebP) remain spectrally uniform.
 
 <p align="center">
-  <img src="paper/figures/fig_leakage_vs_bpp_256.png" alt="Rate-leakage comparison at 256×256" width="60%">
+  <img src="paper/figures/fig_leakage_vs_bpp_256.png" alt="Rate-leakage comparison at 256×256" width="80%">
 </p>
 
 <p align="center">
