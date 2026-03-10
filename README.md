@@ -1,17 +1,22 @@
 # DCT Basis Benchmarks for Neural Image Compression
 
-[![Paper](https://img.shields.io/badge/IEEE_SPL-2026-blue)](https://github.com/nkalmykovsk/dct_benchmark_nic)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 
-> **DCT Basis Benchmarks for Neural Image Compression: Revealing Frequency-Dependent Biases**  
+> **DCT Basis Benchmarks for Neural Image Compression**  
 > Kalmykov N.I., Varetsa M.S., Dibo R., Xu Z., Liu Y., Oseledets I., Phan A.-H.  
-> *IEEE Signal Processing Letters*, 2026.
 
 ---
 
 ## What this benchmark does
 
-Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix — where each spatial position encodes a unique frequency pair — we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
+Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix - where each spatial position encodes a unique frequency pair - we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
+
+<p align="center">
+  <img src="paper/figures/overview_3d_median_leak_allmodels.png" alt="3D overview of median frequency leakage" width="90%">
+</p>
+<p align="center">
+  <em>Median frequency leakage L<sub>k</sub> (↓ better) across quality levels and image sizes for 11 codecs.</em>
+</p>
 
 <p align="center">
   <img src="paper/figures/fig3_dct_response_grid.png" alt="DCT grid response for 11 codecs" width="100%">
@@ -159,7 +164,7 @@ python scripts/run_directional.py --size 512 --matched-bpp
 # 128×128 (Fig. 2c)
 python scripts/run_finetune.py --model cheng2020-anchor --size 128 --steps 900
 
-# 1024×1024 (Fig. S3, ~30 min on A100)
+# 1024×1024 (Fig. S3, ~10 min on A100)
 python scripts/run_finetune.py --model cheng2020-anchor --size 1024 --steps 900
 ```
 
@@ -244,7 +249,7 @@ dct_benchmark_nic/
 | MBT2018 | NIC | CompressAI q=1–6 |
 | Cheng2020-Anchor | NIC | CompressAI q=1–6 |
 | Cheng2020-Attention | NIC | CompressAI q=1–6 |
-| TCM | NIC | λ∈{0.0025,...,0.05}, p=128 |
+| TCM | NIC | λ∈{0.0025,0.05}, p=64,128 |
 | FTIC | NIC | q=1–6 (n≥256) |
 | JPEG | Classical | quality 20–95 |
 | JPEG XL | Classical | distance 0.1–4.0 |
@@ -256,12 +261,12 @@ dct_benchmark_nic/
 
 ```bibtex
 @article{kalmykov2026dct,
-  title={DCT Basis Benchmarks for Neural Image Compression: Revealing Frequency-Dependent Biases},
+  title={DCT Basis Benchmarks for Neural Image Compression},
   author={Kalmykov, Nikolay I. and Varetsa, Maria S. and Dibo, Razan and
           Xu, Zhonghan and Liu, Yipeng and Oseledets, Ivan and Phan, Anh-Huy},
-  journal={IEEE Signal Processing Letters},
-  year={2026},
-  publisher={IEEE}
+  journal={},
+  year={},
+  publisher={}
 }
 ```
 

@@ -7,15 +7,14 @@ Usage:
     python scripts/run_benchmark.py                          # all models, size=256
     python scripts/run_benchmark.py --size 128 256 512       # multiple sizes
     python scripts/run_benchmark.py --models jpeg cheng2020-anchor  # subset
-    python scripts/run_benchmark.py --size 256 --num-runs 10        # averaged
     python scripts/run_benchmark.py --quality-sweep          # all q levels
 
 Codec configurations used for the paper:
     CompressAI / FTIC  : q ∈ {1, 2, 3, 4, 5, 6}
-    TCM                : λ ∈ {0.0025, 0.005, 0.01, 0.02, 0.035, 0.05}, p=128
+    TCM                : λ ∈ {0.0025, 0.05}, p ∈ {64, 128}
     JPEG / WebP        : quality ∈ {20, 40, 55, 70, 85, 95}
     JPEG XL            : distance ∈ {4.0, 2.0, 1.0, 0.6, 0.3, 0.1}
-    DCT sizes          : n ∈ {64, 128, 256, 512, 1024}; FTIC n ≥ 256
+    DCT sizes          : n ∈ {64, 128, 256, 512, 1024}; FTIC, TCM n ≥ 256
 """
 
 import argparse
@@ -29,7 +28,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dct_nic import evaluate_codec, load_model, get_available_models
 from dct_nic.loaders import ImageCodecModel
 
-# Quality sweep settings (Table I in the paper uses q=6 / highest quality)
 CLASSICAL_SCAN = {
     "jpeg":   list(range(20, 100, 5)) + [95],
     "webp":   list(range(20, 100, 5)) + [95],
@@ -42,9 +40,12 @@ TCM_P_VALUES = [64, 128]
 MIN_SIZE = {"ftic": 256, "tcm": 256}
 
 
-def probe_one(name: str, quality: int, device, size: int,
-              classical_q: int | float | None = None, tcm_p: int | None = None) -> dict | None:
-    """Run a single (model, size, quality) evaluation. Returns row dict or None."""
+def probe_one(
+    name: str, quality: int, device, size: int,
+    classical_q: int | float | None = None,
+    tcm_p: int | None = None,
+    ) -> dict | None:
+    """Run a single (model, size, quality) evaluation."""
     base = str(Path(__file__).resolve().parent.parent / "third_party")
     try:
         if classical_q is not None:
@@ -53,7 +54,9 @@ def probe_one(name: str, quality: int, device, size: int,
             elif name == "webp":
                 model = ImageCodecModel("webp", webp_quality=int(classical_q))
             elif name == "jpegxl":
-                model = ImageCodecModel("jpegxl", jpegxl_distance=float(classical_q))
+                model = ImageCodecModel(
+                    "jpegxl", jpegxl_distance=float(classical_q)
+                )
             label = str(classical_q)
         elif tcm_p is not None:
             model = load_model("tcm", quality, device, p=tcm_p, base_dir=base)
@@ -62,7 +65,7 @@ def probe_one(name: str, quality: int, device, size: int,
             model = load_model(name, quality, device, base_dir=base)
             label = f"q={quality}"
 
-        res = evaluate_codec(model, size=size, device=device, model_name=name, num_runs=1)
+        res = evaluate_codec(model, size=size, device=device, model_name=name)
         return {
             "model": name, "size": size, "setting": label,
             "bpp": res["bpp"], "L_k": res["L_k"],
@@ -76,22 +79,24 @@ def probe_one(name: str, quality: int, device, size: int,
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--size", type=int, nargs="+", default=[256],
                         help="DCT basis size(s) (default: 256)")
     parser.add_argument("--models", nargs="*", default=None,
                         help="Codec names (default: all available)")
     parser.add_argument("--quality", type=int, default=6,
-                        help="Quality level for single-quality run (default: 6)")
+                        help="Quality level for single-q run (default: 6)")
     parser.add_argument("--quality-sweep", action="store_true",
-                        help="Sweep all quality levels (generates rate-leakage curves)")
+                        help="Sweep all q (generates rate-leakage curves)")
     parser.add_argument("--num-runs", type=int, default=1,
                         help="Runs to average (default: 1)")
     parser.add_argument("--device", default="cuda",
                         help="PyTorch device (default: cuda)")
     parser.add_argument("--out", default="results/leakage_vs_bpp",
-                        help="Output directory (default: results/leakage_vs_bpp)")
+                        help="Output dir (default: results/leakage_vs_bpp)")
     args = parser.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")

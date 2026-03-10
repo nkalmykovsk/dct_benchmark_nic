@@ -40,7 +40,10 @@ def ensure_gdown() -> None:
     try:
         _run([sys.executable, "-m", "gdown", "--version"], quiet=True)
     except Exception:
-        _run([sys.executable, "-m", "pip", "install", "--upgrade", "gdown"], quiet=True)
+        _run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "gdown"],
+            quiet=True
+        )
 
 
 def ensure_git() -> None:

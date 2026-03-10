@@ -13,9 +13,7 @@ import numpy as np
 from scipy.fft import dct, dctn
 
 
-# ---------------------------------------------------------------------------
 # DCT basis generation
-# ---------------------------------------------------------------------------
 
 def build_dct_basis(n: int) -> np.ndarray:
     """Return the n×n orthonormal DCT-II basis matrix D.
@@ -41,9 +39,7 @@ def build_dct_basis_rgb(n: int) -> tuple[np.ndarray, float, float]:
     return image, vmin, vmax
 
 
-# ---------------------------------------------------------------------------
 # Frequency-response matrix
-# ---------------------------------------------------------------------------
 
 def compute_response_matrix(d_hat: np.ndarray) -> np.ndarray:
     """Compute the n×n frequency-response matrix R from a reconstructed basis.
@@ -69,9 +65,7 @@ def compute_response_matrix(d_hat: np.ndarray) -> np.ndarray:
     return R
 
 
-# ---------------------------------------------------------------------------
 # Scalar metrics from R
-# ---------------------------------------------------------------------------
 
 def leakage(R: np.ndarray) -> np.ndarray:
     """Per-frequency leakage L_k = 1 - R[k, k] ∈ [0, 1].
@@ -159,9 +153,7 @@ def all_metrics(R: np.ndarray) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Spectral leakage coupling  (Section II-C in the paper)
-# ---------------------------------------------------------------------------
+# Spectral leakage coupling
 
 def spectral_leakage_coupling(
     orig_gray: np.ndarray,
@@ -175,7 +167,7 @@ def spectral_leakage_coupling(
         orig_gray:       (H, W) original grayscale image in [0, 1].
         recon_gray:      (H, W) reconstructed grayscale image.
         leakage_profile: (n,) per-frequency leakage L_k from DCT benchmark.
-        num_bins:        Number of radial frequency bins.
+        num_bins:        Num of radial frequency bins.
 
     Returns:
         dict with keys: L_tilde, rho_bar, ratio (L̃/ρ̄), rho (per-bin array).

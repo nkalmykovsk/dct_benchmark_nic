@@ -5,7 +5,9 @@ Quick start:
     from dct_nic import evaluate_codec, load_model
 
     model = load_model("cheng2020-anchor", quality=4, device="cuda")
-    result = evaluate_codec(model, size=256, device="cuda", model_name="cheng2020-anchor")
+    result = evaluate_codec(
+        model, size=256, device="cuda", model_name="cheng2020-anchor"
+    )
 
     print(f"Median leakage L_k: {result['L_k']:.4f}")
     print(f"Median ODR_k:       {result['ODR_k']:.4f}")

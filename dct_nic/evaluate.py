@@ -1,7 +1,7 @@
 """DCT benchmark evaluation pipeline.
 
 Main entry points:
-    evaluate_codec(model, size, device, num_runs) -> dict
+    evaluate_codec(model, size, device) -> dict
     run_benchmark(models, sizes, qualities, device, out_dir) -> pd.DataFrame
 """
 
@@ -20,14 +20,14 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-# ---------------------------------------------------------------------------
 # Single-model evaluation
-# ---------------------------------------------------------------------------
 
 MIN_SIZE = {"ftic": 256, "tcm": 256}
 
 
-def _model_forward(model, x: torch.Tensor, model_name: str = "") -> tuple[torch.Tensor, float | None]:
+def _model_forward(
+    model, x: torch.Tensor, model_name: str = ""
+) -> tuple[torch.Tensor, float | None]:
     """Run one codec forward pass; return (x_hat, bpp)."""
     _, _, H, W = x.shape
     tag = model_name.lower()
@@ -79,7 +79,7 @@ def evaluate_codec(
         size:       DCT basis dimension n.
         device:     PyTorch device string or object.
         model_name: Used for minimum-size validation (FTIC/TCM ≥ 256).
-        num_runs:   Number of forward passes to average (for stochastic codecs).
+        num_runs:   Num of forward passes to average (for stochastic codecs).
 
     Returns:
         dict with keys:
@@ -98,7 +98,9 @@ def evaluate_codec(
         device = torch.device(device if torch.cuda.is_available() else "cpu")
 
     basis_image, vmin, vmax = build_dct_basis_rgb(size)
-    x = torch.from_numpy(basis_image).float().permute(2, 0, 1).unsqueeze(0).to(device)
+    x = torch.from_numpy(
+        basis_image
+    ).float().permute(2, 0, 1).unsqueeze(0).to(device)
 
     R_accum: list[np.ndarray] = []
     bpp_list: list[float] = []
@@ -127,9 +129,7 @@ def evaluate_codec(
     return result
 
 
-# ---------------------------------------------------------------------------
 # Batch benchmark runner
-# ---------------------------------------------------------------------------
 
 def run_benchmark(
     models: dict,
@@ -143,9 +143,9 @@ def run_benchmark(
 
     Args:
         models:   {name: callable} mapping. Use loaders.load_model() to build.
-        sizes:    List of DCT basis sizes, e.g. [64, 128, 256, 512].
+        sizes:    List of DCT basis sizes, e.g. [64, 128, 256, 512, 1024].
         device:   PyTorch device.
-        num_runs: Runs to average per setting.
+        num_runs: Runs to average per setting (for stochastic codecs).
         out_dir:  If set, save results CSV to out_dir/benchmark_results.csv.
         verbose:  Print progress.
 
@@ -161,16 +161,26 @@ def run_benchmark(
         for sz in sizes:
             done += 1
             if verbose:
-                print(f"[{done:3d}/{total}] {name:30s} size={sz}", end=" ... ", flush=True)
+                print(
+                    f"[{done:3d}/{total}] {name:30s} size={sz}",
+                    end=" ... ",
+                    flush=True,
+                )
             try:
                 res = evaluate_codec(model, size=sz, device=device,
                                      model_name=name, num_runs=num_runs)
                 row = {"model": name, "size": sz}
-                for k in ("L_k", "L_low", "L_high", "ODR_k", "|Δc_k|", "s_k", "H_k", "bpp"):
+                for k in (
+                    "L_k", "L_low", "L_high",
+                    "ODR_k", "|Δc_k|", "s_k", "H_k", "bpp",
+                ):
                     row[k] = res.get(k)
                 rows.append(row)
                 if verbose:
-                    print(f"L_k={res['L_k']:.4f}  bpp={res['bpp']:.3f}" if res["bpp"] else f"L_k={res['L_k']:.4f}")
+                    print(
+                        f"L_k={res['L_k']:.4f}  bpp={res['bpp']:.3f}"
+                        if res["bpp"] else f"L_k={res['L_k']:.4f}",
+                    )
             except Exception as e:
                 if verbose:
                     print(f"FAILED: {e}")

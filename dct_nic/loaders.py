@@ -12,6 +12,7 @@ import imageio.v3 as iio
 import numpy as np
 import torch
 from PIL import Image
+from compressai.zoo import models as compressai_models
 
 try:
     import imagecodecs as _ic
@@ -20,9 +21,9 @@ except ImportError:
 
 
 class ImageCodecModel:
-    """Wrapper for traditional image codecs (JPEG, WebP, JPEG2000, JPEG XL)."""
+    """Wrapper for traditional image codecs (JPEG, WebP, JPEG XL)"""
 
-    SUPPORTED_CODECS = {'jpeg', 'webp', 'jpeg2000', 'jpegxl'}
+    SUPPORTED_CODECS = {'jpeg', 'webp', 'jpegxl'}
 
     def __init__(self, codec: str, q_level: int = 1,
                  jpeg_quality: int | None = None,
@@ -40,12 +41,12 @@ class ImageCodecModel:
 
     @staticmethod
     def _map_q_to_quality(q: int, max_q: int = 6) -> int:
-        """Map abstract quality level (1..max_q) to JPEG/WebP scale (20..95)."""
+        """Map abstract q (1..max_q) to JPEG/WebP scale (20..95)"""
         q = max(1, min(int(q), max_q))
         return int(np.linspace(20, 95, num=max_q)[q - 1])
 
     def __call__(self, x: torch.Tensor) -> dict:
-        """Compress and decompress input tensor, return dict with 'x_hat' and 'bpp'."""
+        """Compress-decompress input tensor, return dict with x_hat and bpp"""
         img_u8 = self._tensor_to_uint8(x)
         out_u8, nbytes = self._encode_decode(img_u8)
         x_hat = self._uint8_to_tensor(out_u8)
@@ -54,31 +55,33 @@ class ImageCodecModel:
         return {"x_hat": x_hat, "bpp": bpp}
 
     def _tensor_to_uint8(self, x: torch.Tensor) -> np.ndarray:
-        """Convert [1,3,H,W] tensor in [0,1] to uint8 HxWx3 array."""
+        """Convert [1,3,H,W] tensor in [0,1] to uint8 HxWx3 array"""
         img = x.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
         return np.clip(img * 255.0 + 0.5, 0, 255).astype(np.uint8)
 
     def _uint8_to_tensor(self, out_u8: np.ndarray) -> torch.Tensor:
-        """Convert uint8 HxWx3 array to [1,3,H,W] tensor in [0,1]."""
+        """Convert uint8 HxWx3 array to [1,3,H,W] tensor in [0,1]"""
         if out_u8.ndim == 2:
             out_u8 = np.stack([out_u8] * 3, axis=-1)
         out_f = out_u8.astype(np.float32) / 255.0
         return torch.from_numpy(out_f).permute(2, 0, 1).unsqueeze(0)
 
     def _encode_decode(self, img_u8: np.ndarray) -> tuple[np.ndarray, int]:
-        """Encode and decode image. Returns (decoded_image, nbytes_compressed)."""
+        """Encode-decode image. Returns (decoded_image, nbytes_compressed)"""
         if self.codec == 'jpeg':
             return self._jpeg_roundtrip(img_u8)
         elif self.codec == 'webp':
             return self._webp_roundtrip(img_u8)
-        elif self.codec == 'jpeg2000':
-            return self._jpeg2000_roundtrip(img_u8)
         elif self.codec == 'jpegxl':
             return self._jpegxl_roundtrip(img_u8)
         raise ValueError(f"Unsupported codec: {self.codec}")
 
     def _jpeg_roundtrip(self, img_u8: np.ndarray) -> tuple[np.ndarray, int]:
-        q_val = self._jpeg_quality if self._jpeg_quality is not None else self._map_q_to_quality(self.q_level)
+        q_val = (
+            self._jpeg_quality
+            if self._jpeg_quality is not None
+            else self._map_q_to_quality(self.q_level)
+        )
         buf = BytesIO()
         Image.fromarray(img_u8, mode='RGB').save(
             buf, format='JPEG', quality=q_val, subsampling=0, optimize=True
@@ -88,7 +91,11 @@ class ImageCodecModel:
         return np.array(Image.open(buf).convert('RGB')), nbytes
 
     def _webp_roundtrip(self, img_u8: np.ndarray) -> tuple[np.ndarray, int]:
-        q_val = self._webp_quality if self._webp_quality is not None else self._map_q_to_quality(self.q_level)
+        q_val = (
+            self._webp_quality
+            if self._webp_quality is not None
+            else self._map_q_to_quality(self.q_level)
+        )
         buf = BytesIO()
         Image.fromarray(img_u8, mode='RGB').save(
             buf, format='WEBP', quality=q_val, method=6
@@ -96,44 +103,6 @@ class ImageCodecModel:
         nbytes = buf.getbuffer().nbytes
         buf.seek(0)
         return np.array(Image.open(buf).convert('RGB')), nbytes
-
-    def _jpeg2000_roundtrip(self, img_u8: np.ndarray) -> tuple[np.ndarray, int]:
-        psnr_list = [20.0, 24.0, 28.0, 32.0, 36.0, 40.0]
-        cr_list = [500, 200, 100, 50, 25, 12]
-        idx = min(max(self.q_level, 1), 6) - 1
-        target_psnr = psnr_list[idx]
-        cr = cr_list[idx]
-
-        if _ic is not None:
-            try:
-                encoded = _ic.jpeg2k_encode(
-                    img_u8,
-                    psnr=target_psnr,
-                    irreversible=True,
-                    mct=1,
-                )
-                nbytes = len(encoded)
-                return _ic.jpeg2k_decode(encoded), nbytes
-            except Exception:
-                pass
-
-        tmp = np.ascontiguousarray(img_u8)
-        with BytesIO() as buf:
-            for writer_kwargs in [
-                {'psnr': target_psnr},
-                {'cratio': cr},
-                {'rate': max(0.05, 8.0 / cr)},
-                {},
-            ]:
-                try:
-                    iio.imwrite(buf, tmp, extension='.jp2', **writer_kwargs)
-                    nbytes = buf.getbuffer().nbytes
-                    buf.seek(0)
-                    return iio.imread(buf), nbytes
-                except Exception:
-                    buf.seek(0)
-                    buf.truncate()
-        raise RuntimeError("JPEG2000 encoding failed with all backends")
 
     def _jpegxl_roundtrip(self, img_u8: np.ndarray) -> tuple[np.ndarray, int]:
         dist_map = [4.0, 3.0, 2.0, 1.5, 1.0, 0.6]
@@ -188,8 +157,7 @@ class ImageCodecModel:
 
 def load_compressai_model(model_name: str, quality: int, device: torch.device):
     """Load a pretrained CompressAI model."""
-    from compressai.zoo import models as compressai_models
-
+    
     model_class = compressai_models.get(model_name, None)
     if not model_class:
         raise ValueError(
@@ -248,14 +216,13 @@ def load_tcm_model(p: int, device: torch.device, base_dir: str):
     }
     if p not in checkpoint_map:
         raise ValueError(
-            f"Unsupported p value: {p}. Supported: {list(checkpoint_map.keys())}"
+            f"Unsupported p: {p}. Supported: {list(checkpoint_map.keys())}"
         )
 
     checkpoint = torch.load(checkpoint_map[p], map_location=device)
     state_dict = {
         k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()
     }
-
     from models.tcm import TCM
     model = TCM(
         config=[2, 2, 2, 2, 2, 2],
@@ -285,7 +252,9 @@ def load_ftic_model(quality: int, device: torch.device, base_dir: str):
     }
 
     if quality not in checkpoint_map:
-        raise ValueError(f"Quality {quality} not in {list(checkpoint_map.keys())}")
+        raise ValueError(
+            f"Quality {quality} not in {list(checkpoint_map.keys())}"
+        )
 
     ckpt_path = ftic_path / "checkpoints" / checkpoint_map[quality]
     if not ckpt_path.exists():
@@ -313,9 +282,7 @@ def load_ftic_model(quality: int, device: torch.device, base_dir: str):
         sys.path.remove(ftic_path_s)
     sys.path.insert(0, ftic_path_s)
 
-    # Now import
     from models.flic import FrequencyAwareTransFormer
-
     model = FrequencyAwareTransFormer().to(device).eval()
     checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
 
@@ -343,16 +310,16 @@ def load_model(
     classical_overrides: dict | None = None,
 ):
     """
-    Universal model loader for NIC and traditional codecs.
+    Universal model loader for NIC and classical codecs.
 
     Args:
-        model_name: 'ftic', 'tcm', CompressAI model name, or codec ('jpeg', 'webp', 'jpegxl', 'jpeg2000')
-        quality: Quality level (1-6 for most models)
+        model_name: 'ftic', 'tcm', CompressAI model, or classical codec
+        quality: q-level (1-6 for most models)
         device: torch device
         p: TCM-specific parameter (64 or 128)
-        base_dir: Base directory for FTIC/TCM checkpoints
-        classical_overrides: Optional dict for classical codecs, e.g. {'jpeg': 43, 'webp': 70, 'jpegxl': 2.5}
-            to use specific quality/distance instead of the mapped q_level.
+        base_dir: Base dir for FTIC/TCM checkpoints
+        classical_overrides: Optional dict for classical codecs
+            to use specific q/distance instead of the mapped q_level.
     """
     name = model_name.lower()
 
@@ -382,7 +349,6 @@ def load_model(
 def get_available_models(include_codecs: bool = True) -> list:
     """Return list of available model names."""
     try:
-        from compressai.zoo import models as compressai_models
         zoo_models = [
             'cheng2020-anchor', 'cheng2020-attn',
             'bmshj2018-factorized', 'bmshj2018-hyperprior',
@@ -394,6 +360,5 @@ def get_available_models(include_codecs: bool = True) -> list:
 
     models = ['ftic', 'tcm'] + available
     if include_codecs:
-        # jpeg2000 is often problematic / flaky across environments
-        models += list(ImageCodecModel.SUPPORTED_CODECS - {'jpeg2000'})
+        models += list(ImageCodecModel.SUPPORTED_CODECS)
     return models
