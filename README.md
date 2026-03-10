@@ -190,16 +190,16 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
   <td align="center"><b>ChengAnchor (q=6)</b></td>
 </tr>
 <tr>
-  <td><img src="paper/div2k_clic_examples_crop/0769.png" width="380"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/0769.png" width="380"></td>
+  <td><img src="paper/div2k_clic_examples_crop/0769.png" width="400"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0769.png" width="400"></td>
 </tr>
 <tr>
-  <td><img src="paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png" width="320"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/26f350af0f6ee2fb314606ebc2b56e56.png" width="380"></td>
+  <td><img src="paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png" width="400"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/26f350af0f6ee2fb314606ebc2b56e56.png" width="400"></td>
 </tr>
 <tr>
-  <td><img src="paper/div2k_clic_examples_crop/0772.png" width="380"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/0772.png" width="380"></td>
+  <td><img src="paper/div2k_clic_examples_crop/0772.png" width="400"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0772.png" width="400"></td>
 </tr>
 </table>
 </p>
