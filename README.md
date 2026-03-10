@@ -5,25 +5,27 @@
 > **DCT Basis Benchmarks for Neural Image Compression**  
 > Kalmykov N.I., Varetsa M.S., Dibo R., Xu Z., Liu Y., Oseledets I., Phan A.-H.  
 
+<p align="center">
 <table>
 <tr>
   <td align="center"><b>Original</b></td>
-  <td align="center"><b>ChengAnchor q=6</b></td>
+  <td align="center"><b>ChengAnchor (q=6)</b></td>
 </tr>
 <tr>
-  <td><img src="paper/div2k_clic_examples_crop/0769.png" width="280"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/0769.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_crop/0769.png" width="320"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0769.png" width="320"></td>
 </tr>
 <tr>
-  <td><img src="paper/div2k_clic_examples_crop/0772.png" width="280"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/0772.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png" width="320"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/26f350af0f6ee2fb314606ebc2b56e56.png" width="320"></td>
 </tr>
 <tr>
-  <td><img src="paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png" width="280"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/26f350af0f6ee2fb314606ebc2b56e56.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_crop/0772.png" width="320"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0772.png" width="320"></td>
 </tr>
 </table>
-<p align="center"><em>Original (center crop) → ChengAnchor q=6 — 768×512 / 512×768</em></p>
+</p>
+<p align="center"><em>Original images (DIV2K/CLIC, center crop 768×512 / 512×768) → ChengAnchor (q=6). Clean compression without adversarial attacks already introduces visible artifacts.</em></p>
 
 ---
 
