@@ -187,7 +187,7 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
 <table>
 <tr>
   <td align="center"><b>Original</b></td>
-  <td align="center"><b>ChengAnchor (q=6)</b></td>
+  <td align="center"><b>Cheng2020-Anchor (q=6)</b></td>
 </tr>
 <tr>
   <td><img src="paper/div2k_clic_examples_crop/0769.png" width="400"></td>
@@ -203,7 +203,7 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
 </tr>
 </table>
 </p>
-<p align="center"><em>Original images (DIV2K/CLIC, center crop 768×512 / 512×768) → ChengAnchor (q=6). Clean compression without adversarial attacks already introduces visible artifacts.</em></p>
+<p align="center"><em>Original images (DIV2K/CLIC, center crop 768×512 / 512×768) → Cheng2020-Anchor (q=6). Clean compression without adversarial attacks already introduces visible artifacts.</em></p>
 
 ## Codec Configurations
 
