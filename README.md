@@ -5,40 +5,11 @@
 > **DCT Basis Benchmarks for Neural Image Compression**  
 > Kalmykov N.I., Varetsa M.S., Dibo R., Xu Z., Liu Y., Oseledets I., Phan A.-H.  
 
-<p align="center">
-<table>
-<tr>
-  <td align="center"><b>Original</b></td>
-  <td align="center"><b>ChengAnchor (q=6)</b></td>
-</tr>
-<tr>
-  <td><img src="paper/div2k_clic_examples_crop/0769.png" width="320"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/0769.png" width="320"></td>
-</tr>
-<tr>
-  <td><img src="paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png" width="320"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/26f350af0f6ee2fb314606ebc2b56e56.png" width="320"></td>
-</tr>
-<tr>
-  <td><img src="paper/div2k_clic_examples_crop/0772.png" width="320"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/0772.png" width="320"></td>
-</tr>
-</table>
-</p>
-<p align="center"><em>Original images (DIV2K/CLIC, center crop 768×512 / 512×768) → ChengAnchor (q=6). Clean compression without adversarial attacks already introduces visible artifacts.</em></p>
-
 ---
 
 ## What this benchmark does
 
 Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix - where each spatial position encodes a unique frequency pair - we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
-
-<p align="center">
-  <img src="paper/figures/overview_3d_median_leak_allmodels.png" alt="3D overview of median frequency leakage" width="90%">
-</p>
-<p align="center">
-  <em>Median frequency leakage L<sub>k</sub> (↓ better) across quality levels and image sizes for 11 codecs.</em>
-</p>
 
 <p align="center">
   <img src="paper/figures/fig3_dct_response_grid.png" alt="DCT grid response for 11 codecs" width="100%">
@@ -211,6 +182,28 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
 ```
 
 ---
+
+<p align="center">
+<table>
+<tr>
+  <td align="center"><b>Original</b></td>
+  <td align="center"><b>ChengAnchor (q=6)</b></td>
+</tr>
+<tr>
+  <td><img src="paper/div2k_clic_examples_crop/0769.png" width="380"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0769.png" width="380"></td>
+</tr>
+<tr>
+  <td><img src="paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png" width="320"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/26f350af0f6ee2fb314606ebc2b56e56.png" width="380"></td>
+</tr>
+<tr>
+  <td><img src="paper/div2k_clic_examples_crop/0772.png" width="380"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0772.png" width="380"></td>
+</tr>
+</table>
+</p>
+<p align="center"><em>Original images (DIV2K/CLIC, center crop 768×512 / 512×768) → ChengAnchor (q=6). Clean compression without adversarial attacks already introduces visible artifacts.</em></p>
 
 ## Codec Configurations
 
