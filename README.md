@@ -9,7 +9,7 @@
 
 ## What this benchmark does
 
-Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix - where each spatial position encodes a unique frequency pair - we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
+Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix, where each spatial position encodes a unique frequency pair, we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
 
 <p align="center">
   <img src="paper/figures/fig3_dct_response_grid.png" alt="DCT grid response for 11 codecs" width="100%">
@@ -157,7 +157,7 @@ python scripts/run_directional.py --size 512 --matched-bpp
 # 128×128 (Fig. 2c)
 python scripts/run_finetune.py --model cheng2020-anchor --size 128 --steps 900
 
-# 1024×1024 (Fig. S3, ~10 min on A100)
+# 1024×1024 (Fig. S3, ~5 min on A100)
 python scripts/run_finetune.py --model cheng2020-anchor --size 1024 --steps 900
 ```
 
@@ -239,7 +239,7 @@ dct_benchmark_nic/
 ├── notebooks/
 │   ├── 01_demo.ipynb      # Interactive demo and exploration
 │   └── 02_paper_figures.ipynb  # Reproduce all paper figures
-├── results/               # Pre-computed CSVs (lightweight, committed)
+├── results/               # Pre-computed CSVs
 │   ├── all_metrics_summary.csv  # Full benchmark: all codecs × sizes × q
 │   ├── leakage_vs_bpp/    # Rate–leakage scan data per size
 │   ├── directional/       # Directional leakage data
