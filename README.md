@@ -1,40 +1,55 @@
-# DCT Basis Benchmarks for Neural Image Compression: Revealing Frequency Dependent Biases
+# DCT Basis Benchmarks for Neural Image Compression
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
+
+> **DCT Basis Benchmarks for Neural Image Compression**  
+> Kalmykov N.I., Varetsa M.S., Dibo R., Liu Y., Oseledets I., Phan A.-H.  
+
+---
+
+## What this benchmark does
+
+Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix, where each spatial position encodes a unique frequency pair, we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
 
 <p align="center">
-  <img src="images/overview_3d_median_leak_allmodels.png" alt="3D Overview of Median Frequency Leakage" width="100%">
+  <a href="paper/figures/fig3_dct_response_grid.png">
+    <img src="paper/figures/fig3_dct_response_grid.png" alt="DCT grid response for 11 codecs" width="1200" style="max-width: 100%; height: auto;">
+  </a>
+</p>
+
+**Key finding:** Neural image codecs suppress up to **94% of their distortion** in high-frequency bands, while classical codecs (JPEG, JPEG XL, WebP) remain spectrally uniform.
+
+<p align="center">
+  <img src="paper/figures/fig_leakage_vs_bpp_256.png" alt="Rate-leakage comparison at 256×256" width="60%">
 </p>
 
 <p align="center">
-  <em>3D overview of median frequency leakage (L<sub>k</sub>) for 10 codecs. Each panel: x = quality, y = image size, z = median L<sub>k</sub> (↓ better). Values are medians across frequency bins, averaged over 100 runs.</em>
+  <em>Rate–leakage comparison at 256×256. Traditional codecs (dashed) achieve orders-of-magnitude lower leakage across all bitrates. TCM and FTIC approach classical levels.</em>
 </p>
 
 ---
 
-## Overview
+## Pipeline
 
-This repository provides a systematic benchmark for evaluating **frequency response characteristics** of image compression codecs using DCT (Discrete Cosine Transform) basis functions as test signals.
-
-**Key Contributions:**
-- Novel frequency-domain evaluation framework using DCT basis images
-- Comprehensive analysis of 10 codecs: 3 traditional (JPEG, JPEG XL, WebP) and 7 neural (BMShj18-Factorized, BMShj18-Hyperprior, MBT18-Mean, MBT18, Cheng2020-Anchor, Cheng2020-Attn, TCM, FTIC)
-- Six frequency-specific metrics revealing codec biases
-- Adaptive fine-tuning method to reduce frequency leakage
-
----
-
-## Evaluated Metrics
-
-We propose six metrics computed from the response matrix **R** obtained by compressing DCT basis images:
-
-| Metric | Symbol | Description |
-|--------|--------|-------------|
-| **Frequency Leakage** | L<sub>k</sub> | Energy leaking to off-diagonal elements: L<sub>k</sub> = 1 − diag(R)<sub>k</sub> |
-| **Off-Diagonal Ratio** | ODR<sub>k</sub> | Ratio of off-diagonal to diagonal response |
-| **Centroid Shift** | \|Δc<sub>k</sub>\| | Displacement of energy centroid from diagonal position |
-| **Spread** | s<sub>k</sub> | Spatial spread of response around the diagonal |
-| **Entropy** | H<sub>k</sub> | Shannon entropy of the normalized response distribution (bits) |
-| **Concentration Energy** | CE<sub>k</sub>(w) | Energy ratio within window w around diagonal |
+```
+DCT basis  D = DCT(Iₙ)
+     │
+     ▼  [Codec: encode → decode]
+     │
+Reconstruction  D̂
+     │
+     ▼  [DCT domain analysis]
+     │
+Response matrix  R[i,k] = |DCT(D̂[:,k])ᵢ|² / Σⱼ|DCT(D̂[:,k])ⱼ|²
+     │
+     ▼
+Metrics per frequency k:
+  L_k  = 1 − R[k,k]          Leakage       ↓ better
+  ODR_k = tanh(Σᵢ≠ₖ R[i,k] / 2R[k,k])  Off-diag ratio ↓ better
+  |Δ_k|  = |centroid(k) − k| / norm     Centroid shift ↓ better
+  σ_k    = spread of response column k  Spread         ↓ better
+  H_k    = entropy of R[:,k]            Entropy        ↓ better
+```
 
 ---
 
@@ -43,32 +58,168 @@ We propose six metrics computed from the response matrix **R** obtained by compr
 ```bash
 git clone https://github.com/nkalmykovsk/dct_benchmark_nic.git
 cd dct_benchmark_nic
+
 python3 -m venv env && source env/bin/activate
 pip install -r requirements.txt
+pip install -e .          # install dct_nic as editable package
 ```
 
-**Requirements:** Python ≥ 3.10, PyTorch ≥ 2.0, CUDA-capable GPU (recommended)
+**Requirements:** Python ≥ 3.10, PyTorch ≥ 2.0, CUDA GPU (recommended).
+
+### Optional: JPEG XL support
+
+```bash
+pip install imagecodecs
+```
+
+### Third-party models: TCM and FTIC
+
+TCM and FTIC require cloning their official repositories into `third_party/`:
+
+```bash
+# TCM (Liu et al., 2023)
+git clone https://github.com/jmliu206/LIC_TCM.git third_party/LIC_TCM
+# Download checkpoints via gdown (auto-handled by dct_nic.loaders):
+#   mse_lambda_0.0025.pth.tar  (p=64)
+#   mse_lambda_0.05.pth.tar    (p=128)
+
+# FTIC (Xu et al., ICLR 2024)
+git clone https://github.com/xyq7/ICLR2024-FTIC.git third_party/ICLR2024-FTIC
+# Download checkpoints into third_party/ICLR2024-FTIC/checkpoints/
+#   ckpt_mse_0018.pth ... ckpt_mse_0483.pth
+```
+
+> **Note:** If you only need CompressAI models and classical codecs, third_party setup is optional.
 
 ---
 
-## Usage
+## Quick Start
 
-### Run Full Benchmark
+### Evaluate any codec in 3 lines
 
-```bash
-jupyter notebook demo.ipynb
+```python
+from dct_nic import evaluate_codec, load_model
+
+model = load_model("cheng2020-anchor", quality=4, device="cuda")
+result = evaluate_codec(model, size=256, device="cuda", model_name="cheng2020-anchor")
+
+print(f"Median leakage L_k = {result['L_k']:.4f}")   # lower is better
+print(f"Bitrate            = {result['bpp']:.3f} bpp")
 ```
 
-The notebook executes experiments across:
-- **Models:** JPEG, JPEG XL, WebP, BMShj18-Factorized, BMShj18-Hyperprior, MBT18-Mean, MBT18, Cheng2020-Anchor, Cheng2020-Attn, TCM, FTIC
-- **Quality levels:** q ∈ {1, 2, 3, 4, 5, 6} (p ∈ {64, 128} for TCM)
-- **Image sizes:** 64×64, 128×128, 256×256, 512×512, 1024×1024 (256×256+ for TCM, FTIC)
+### Evaluate your own NIC model
 
-### Generate Figures
+Any callable `f(x) → {"x_hat": tensor}` works:
+
+```python
+from dct_nic import evaluate_codec
+
+class MyNIC:
+    def __call__(self, x):          # x: [1, 3, H, W] tensor in [0, 1]
+        x_hat = my_encode_decode(x) # your codec here
+        return {"x_hat": x_hat}
+
+result = evaluate_codec(MyNIC(), size=256, device="cuda")
+print(f"L_k={result['L_k']:.4f}  ODR={result['ODR_k']:.4f}  H={result['H_k']:.4f}")
+```
+
+### Interactive exploration
 
 ```bash
-python3 utils/generate_figures.py --root results/
+jupyter notebook notebooks/01_demo.ipynb
 ```
+
+---
+
+## Reproducing Paper Results
+
+### Run the full benchmark (generates all CSVs)
+
+```bash
+# Single quality (q=6), DCT size 256
+python scripts/run_benchmark.py --size 256
+
+# Rate–leakage sweep (all quality levels) — generates Fig. 5 data
+python scripts/run_benchmark.py --size 256 --quality-sweep
+
+# All sizes from the paper
+python scripts/run_benchmark.py --size 64 128 256 512 1024 --quality-sweep
+```
+
+### Directional leakage (Fig. S1)
+
+```bash
+# Matched bitrate ≈ 2.5 bpp, 512×512 (paper settings)
+python scripts/run_directional.py --size 512 --matched-bpp
+```
+
+### Fine-tuning experiment (Fig. 2c / Fig. S3)
+
+```bash
+# 128×128 (Fig. 2c)
+python scripts/run_finetune.py --model cheng2020-anchor --size 128 --steps 900
+
+# 1024×1024 (Fig. S3, ~5 min on A100)
+python scripts/run_finetune.py --model cheng2020-anchor --size 1024 --steps 900
+```
+
+### Table I: Kodak evaluation with spectral leakage coupling
+
+```bash
+# Download Kodak images first (24 images, 768×512 / 512×768)
+mkdir -p data/kodak
+# ... download from http://r0k.us/graphics/kodak/
+
+# Run evaluation (requires GPU, ~1h for all models)
+python scripts/run_kodak_eval.py --kodak-dir data/kodak
+
+# Quick test (1 model, 1 image)
+python scripts/run_kodak_eval.py --kodak-dir data/kodak --single
+```
+
+### Generate all paper figures
+
+```bash
+jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
+```
+
+---
+
+## Compression artifacts on natural images
+
+<p align="center">
+<table>
+<tr>
+  <td align="center"><b>Original</b></td>
+  <td align="center"><b>Cheng2020-Anchor (q=6)</b></td>
+</tr>
+<tr>
+  <td><img src="paper/div2k_clic_examples_crop/0769.png" width="400"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0769.png" width="400"></td>
+</tr>
+<tr>
+  <td><img src="paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png" width="400"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/26f350af0f6ee2fb314606ebc2b56e56.png" width="400"></td>
+</tr>
+<tr>
+  <td><img src="paper/div2k_clic_examples_crop/0772.png" width="400"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0772.png" width="400"></td>
+</tr>
+</table>
+</p>
+<p align="center"><em>Original images (DIV2K/CLIC, center crop 768×512 / 512×768) → Cheng2020-Anchor (q=6). Clean compression without adversarial attacks already introduces visible artifacts.</em></p>
+
+## Codec Configurations
+
+| Codec | Quality sweep |
+|-------|--------------|
+| CompressAI (6 models) | q ∈ {1, 2, 3, 4, 5, 6} |
+| FTIC | q ∈ {1, 2, 3, 4, 5, 6} (n ≥ 256 only) |
+| TCM | λ ∈ {0.0025, 0.05}, p=64, 128 (n ≥ 256 only) |
+| JPEG / WebP | quality ∈ {20, 40, 55, 70, 85, 95} |
+| JPEG XL | distance ∈ {4.0, 2.0, 1.0, 0.6, 0.3, 0.1} |
+
+Table I uses ≈0.8–1.0 bpp, DCT size 512×512, 24 Kodak images.
 
 ---
 
@@ -76,57 +227,72 @@ python3 utils/generate_figures.py --root results/
 
 ```
 dct_benchmark_nic/
-├── demo.ipynb              # Main experiment notebook
-├── utils/
-│   ├── functions.py        # Core metrics and evaluation functions
-│   ├── loaders.py          # Model loading utilities
-│   ├── generate_figures.py # Paper figure generation
-│   └── tcm_setup.py        # TCM model setup
-├── results/                # Experiment outputs (metrics, images)
-├── images/                 # Figures for README
+├── dct_nic/               # Installable Python package
+│   ├── __init__.py        # Public API
+│   ├── metrics.py         # L_k, ODR, centroid_shift, spread, entropy
+│   ├── evaluate.py        # evaluate_codec(), run_benchmark()
+│   └── loaders.py         # Model loaders (CompressAI, TCM, FTIC, classical)
+├── scripts/
+│   ├── run_benchmark.py       # Full benchmark → results/leakage_vs_bpp/
+│   ├── run_kodak_eval.py      # Table I: Kodak + L̃ coupling → results/kodak_eval/
+│   ├── run_directional.py     # Directional leakage → results/directional/
+│   ├── run_finetune.py        # Fine-tuning demo → results/finetune/
+│   ├── plot_fig3_grid.py      # Fig. 3: DCT response grid (11 codecs × 2 quality)
+│   ├── plot_fig4b_artifact.py # Fig. 4b: 1024×1024 reconstruction artifact
+│   └── plot_distortion_consistency.py  # Fig. S2: L̃ consistency
+├── notebooks/
+│   ├── 01_demo.ipynb      # Interactive demo and exploration
+│   └── 02_paper_figures.ipynb  # Reproduce all paper figures
+├── results/               # Pre-computed CSVs
+│   ├── all_metrics_summary.csv  # Full benchmark: all codecs × sizes × q
+│   ├── leakage_vs_bpp/    # Rate–leakage scan data per size
+│   ├── directional/       # Directional leakage data
+│   ├── kodak_eval/        # Table I: Kodak spectral coupling + perceptual metrics
+│   └── finetune/          # Fine-tuning results
+├── paper/figures/         # Final paper figures (PDF)
+├── third_party/
+│   ├── LIC_TCM/           # TCM model code + checkpoints
+│   └── ICLR2024-FTIC/     # FTIC model code
 └── requirements.txt
 ```
+
+---
+
+## Evaluated Codecs
+
+| Model | Type | Params |
+|-------|------|--------|
+| BMSHJ2018-Factorized | NIC | CompressAI q=1–6 |
+| BMSHJ2018-Hyperprior | NIC | CompressAI q=1–6 |
+| MBT2018-Mean | NIC | CompressAI q=1–6 |
+| MBT2018 | NIC | CompressAI q=1–6 |
+| Cheng2020-Anchor | NIC | CompressAI q=1–6 |
+| Cheng2020-Attention | NIC | CompressAI q=1–6 |
+| TCM | NIC | λ∈{0.0025,0.05}, p=64,128 |
+| FTIC | NIC | q=1–6 (n≥256) |
+| JPEG | Classical | quality 20–95 |
+| JPEG XL | Classical | distance 0.1–4.0 |
+| WebP | Classical | quality 20–95 |
+
+---
 
 ## Citation
 
 ```bibtex
-@inproceedings{kalmykov2025dct,
-  title={DCT Basis Benchmarks for Neural Image Compression: Revealing Frequency Dependent Biases},
-  author={Kalmykov, Nikolay and ...},
-  booktitle={Proceedings of [Conference Name]},
-  year={2025}
+@article{kalmykov2026dct,
+  title={DCT Basis Benchmarks for Neural Image Compression},
+  author={Kalmykov, Nikolay I. and Varetsa, Maria S. and Dibo, Razan and Liu, Yipeng and Oseledets, Ivan and Phan, Anh-Huy},
+  journal={},
+  year={},
+  publisher={}
 }
 ```
 
 ---
 
-## License
-
-This project is released under the **MIT License**. See `LICENSE`.
-
----
-
-## Model Setup
-
-### Neural Codecs
-
-Most neural codecs (CompressAI models) are automatically downloaded. For TCM and FTIC, follow these steps:
-
-#### TCM (Token-based Context Model)
-See `utils/tcm_setup.py` for automatic setup.
-
-#### FTIC (Frequency-aware Transformer for Image Compression, ICLR 2024)
-1. Clone the repository:
-   ```bash
-   cd third_party
-   git clone https://github.com/xyq7/ICLR2024-FTIC.git
-   ```
-2. Download checkpoints from the repo's Google Drive link into `third_party/ICLR2024-FTIC/checkpoints/`
-
----
-
 ## Acknowledgments
 
-- [CompressAI](https://github.com/InterDigitalInc/CompressAI) for neural codec implementations
-- [LIC_TCM](https://github.com/jmliu206/LIC_TCM) for the TCM model
-- [ICLR2024-FTIC](https://github.com/xyq7/ICLR2024-FTIC) for the FTIC model
+- [CompressAI](https://github.com/InterDigitalInc/CompressAI) — neural codec implementations
+- [LIC_TCM](https://github.com/jmliu206/LIC_TCM) — TCM model
+- [ICLR2024-FTIC](https://github.com/xyq7/ICLR2024-FTIC) — FTIC model
+- Kodak dataset — [USC SIPI](http://sipi.usc.edu/database/database.php?volume=misc)
