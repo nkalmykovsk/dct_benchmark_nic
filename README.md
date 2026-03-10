@@ -215,7 +215,7 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
 | JPEG / WebP | quality ∈ {20, 40, 55, 70, 85, 95} |
 | JPEG XL | distance ∈ {4.0, 2.0, 1.0, 0.6, 0.3, 0.1} |
 
-Table I uses ${\approx}0.8$--$1.0$\,bpp, DCT size 512×512, 24 Kodak images.
+Table I uses ≈0.8–1.0 bpp, DCT size 512×512, 24 Kodak images.
 
 ---
 
