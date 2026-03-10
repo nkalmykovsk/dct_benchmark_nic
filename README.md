@@ -9,7 +9,7 @@
 
 ## What this benchmark does
 
-Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix - where each spatial position encodes a unique frequency pair - we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
+Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix, where each spatial position encodes a unique frequency pair, we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
 
 <p align="center">
   <img src="paper/figures/overview_3d_median_leak_allmodels.png" alt="3D overview of median frequency leakage" width="90%">
