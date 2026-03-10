@@ -211,11 +211,11 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
 |-------|--------------|
 | CompressAI (6 models) | q ∈ {1, 2, 3, 4, 5, 6} |
 | FTIC | q ∈ {1, 2, 3, 4, 5, 6} (n ≥ 256 only) |
-| TCM | λ ∈ {0.0025, 0.005, 0.01, 0.02, 0.035, 0.05}, p=128 |
+| TCM | λ ∈ {0.0025, 0.05}, p=64, 128 (n ≥ 256 only) |
 | JPEG / WebP | quality ∈ {20, 40, 55, 70, 85, 95} |
 | JPEG XL | distance ∈ {4.0, 2.0, 1.0, 0.6, 0.3, 0.1} |
 
-Table I uses q=6 (highest quality), DCT size 512×512, 24 Kodak images.
+Table I uses ${\approx}0.8$--$1.0$\,bpp, DCT size 512×512, 24 Kodak images.
 
 ---
 
