@@ -183,6 +183,8 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
 
 ---
 
+## Compression artifacts on natural images
+
 <p align="center">
 <table>
 <tr>
