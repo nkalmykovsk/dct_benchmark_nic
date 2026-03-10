@@ -279,8 +279,7 @@ dct_benchmark_nic/
 ```bibtex
 @article{kalmykov2026dct,
   title={DCT Basis Benchmarks for Neural Image Compression},
-  author={Kalmykov, Nikolay I. and Varetsa, Maria S. and Dibo, Razan and
-          Xu, Zhonghan and Liu, Yipeng and Oseledets, Ivan and Phan, Anh-Huy},
+  author={Kalmykov, Nikolay I. and Varetsa, Maria S. and Dibo, Razan and Liu, Yipeng and Oseledets, Ivan and Phan, Anh-Huy},
   journal={},
   year={},
   publisher={}
