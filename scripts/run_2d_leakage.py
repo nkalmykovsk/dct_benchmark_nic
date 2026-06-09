@@ -1,29 +1,13 @@
 #!/usr/bin/env python3
-"""2-D DCT-basis leakage (answers Reviewer comment R1.2).
+"""2-D DCT-basis leakage (Reviewer R1.2).
 
-The main paper builds the frequency-response matrix from the *1-D* DCT basis
-(Eq. 1): each column is one 1-D cosine, so leakage L_k is indexed by a single
-axis frequency. This script builds the *2-D* basis and computes the diagonal of
-the frequency-response *tensor*:
-
-    tiles  T_{k,l}[i,j] = a_k a_l cos(pi(i+1/2)k/s) cos(pi(j+1/2)l/s)
-    map    L_{k,l} = 1 - |DCT2(recon T_{k,l})_{k,l}|^2 / sum |DCT2(...)|^2
-
-Reports (i) that the 1-D L_k is the l=0 axis slice of L_{k,l} (ideal codec:
-both zero), (ii) the across-codec rank-equivalence Spearman(median L_{k,l},
-median L_k) — if >0.9 the compact 1-D presentation is faithful — and (iii) the
-radial average L^r(f) = <L_{k,l}>_{sqrt(k^2+l^2)=f}, a principled radial leakage
-for the coupling (Eq. 4) that needs no 1-D->radial interpolation. Saves an
-L_{k,l} heatmap per codec for the supplementary.
-
-Classical codecs (jpeg/webp) run locally via Pillow. On a GPU box (torch +
-dct_nic) every codec — including the neural ones and jpegxl — is loaded through
-dct_nic.load_model so settings match the paper exactly.
+Builds the 2-D DCT basis (tile T_{k,l} per frequency pair) and computes the
+leakage map L_{k,l} = 1 - |DCT2(recon)_{k,l}|^2 / sum|DCT2(recon)|^2 — the
+diagonal of the frequency-response tensor. Reports that the paper's 1-D L_k is
+the l=0 slice of L_{k,l}, the across-codec rank-equivalence Spearman(L_{k,l},
+L_k), and the radial average L^r(f) used by the coupling (Eq. 4).
 
 Usage:
-    # local sanity (no torch needed):
-    python scripts/run_2d_leakage.py --codecs jpeg webp --tile-n 16 --q 50
-    # H100 — run everything at highest quality:
     python scripts/run_2d_leakage.py --tile-n 16 --q 6 --device cuda
     python scripts/run_2d_leakage.py --smoke
 """
@@ -41,7 +25,7 @@ ALL_CODECS = ["jpeg", "webp", "jpegxl", "bmshj2018-factorized", "bmshj2018-hyper
 CLASSICAL = {"jpeg", "webp", "jpegxl"}
 
 
-# --- 2-D DCT basis -----------------------------------------------------------
+# 2-D DCT basis
 
 def _alpha(k, s):
     return np.where(np.asarray(k) == 0, np.sqrt(1.0 / s), np.sqrt(2.0 / s))
@@ -65,7 +49,7 @@ def build_mosaic(s):
     return ((M - vmin) / (vmax - vmin + 1e-9)).astype(np.float32), vmin, vmax
 
 
-# --- leakage -----------------------------------------------------------------
+# leakage
 
 def leakage_map(recon_gray, s):
     """L_{k,l} from a reconstructed mosaic (de-normalized, grayscale)."""
@@ -99,7 +83,7 @@ def radial_profile(L, num_bins):
                      for b in range(num_bins)])
 
 
-# --- codecs ------------------------------------------------------------------
+# codecs
 
 def _pil_classical(img01, codec, q):
     u8 = np.clip(img01 * 255 + 0.5, 0, 255).astype(np.uint8)
@@ -150,7 +134,7 @@ def make_runner(codec, q, device):
     raise RuntimeError(f"{codec} needs torch/dct_nic (run on the GPU box)")
 
 
-# --- driver ------------------------------------------------------------------
+# driver
 
 def to_gray_denorm(rec, lo, hi):
     rec = (lo + (hi - lo) * rec)

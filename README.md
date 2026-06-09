@@ -166,12 +166,10 @@ python scripts/run_2d_leakage.py --tile-n 16 --q 6 --device cuda
 ```
 
 **Using a 2-D basis does not change the conclusions.** The 2-D map ranks codecs
-identically to the 1-D profile (Spearman `0.94–0.96`, stable across tile sizes 16/32),
-and `L_k` is the `l=0` slice of `L_{k,l}` (verified on classical codecs, gap `< 0.002`).
-The same high-frequency-suppression pattern holds (e.g. BMSHJ2018-Factorized high-band
-leakage `≈ 1.0`, classical codecs `≈ 1e-4`). We therefore report the compact 1-D form in
-the paper; the per-codec `L_{k,l}` heatmaps and the radial profile `L^r(f)` are saved to
-`results/leakage_2d/`.
+identically to the 1-D profile (Spearman `0.95`), and `L_k` is the `l=0` slice of
+`L_{k,l}` (verified on classical codecs, gap `< 0.002`). The same high-frequency-
+suppression pattern holds (e.g. BMSHJ2018-Factorized high-band leakage `≈ 1.0`, classical
+codecs `≈ 1e-4`). Results are saved to `results/leakage_2d/`.
 
 ### Fine-tuning experiment (Fig. 2c / Fig. S3)
 
