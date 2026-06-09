@@ -196,6 +196,32 @@ def save_heatmap(L2, codec, out):
     fig.tight_layout(); fig.savefig(out / f"L2map_{codec}.pdf", bbox_inches="tight"); plt.close(fig)
 
 
+def save_grid(rows, out):
+    """One combined L_{k,l} grid over all codecs (single figure for README/supp.)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    n = len(rows)
+    if n == 0:
+        return
+    cols = min(6, n)
+    rows_n = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows_n, cols, figsize=(2.0 * cols, 2.2 * rows_n), squeeze=False)
+    im = None
+    for ax in axes.ravel():
+        ax.axis("off")
+    for idx, r in enumerate(rows):
+        ax = axes[idx // cols][idx % cols]
+        ax.axis("on"); ax.set_xticks([]); ax.set_yticks([])
+        im = ax.imshow(r["L2_map"], origin="lower", cmap="magma", vmin=0, vmax=1)
+        ax.set_title(f"{r['codec']}\nmed={r['med_2d']:.3f}", fontsize=7)
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.025, label=r"$L_{k,l}$")
+    fig.suptitle("2-D DCT-basis leakage map $L_{k,l}$ (low-left = LF, up-right = HF)", fontsize=9)
+    for ext in ("png", "pdf"):
+        fig.savefig(out / f"L2_grid.{ext}", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--codecs", nargs="+", default=ALL_CODECS)
@@ -234,14 +260,32 @@ def main():
               f"low={r['low_2d']:.4f} high={r['high_2d']:.4f}  |L_(k,0)-L_k|max={gap_s}")
 
     np.savez(out / "radial_2d_profiles.npz", **profiles)
+
+    # Persist the answer numbers as a CSV (not just stdout).
+    import csv
+    gate = None
     if len(rows) >= 3:
         from scipy.stats import spearmanr
-        rho = spearmanr([r["med_2d"] for r in rows], [r["med_1d"] for r in rows]).statistic
-        verdict = "PASS (1-D faithful)" if rho > 0.9 else "REVIEW (1-D vs 2-D disagree)"
-        print(f"\nRank-equivalence gate: Spearman(median 2-D, median 1-D) = {rho:+.3f}  -> {verdict}")
+        gate = spearmanr([r["med_2d"] for r in rows], [r["med_1d"] for r in rows]).statistic
+    with open(out / "summary.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["codec", "med_2d", "med_1d", "low_2d", "high_2d", "slice_l0_gap",
+                    "tile_n", "gate_spearman_2d_vs_1d"])
+        for r in rows:
+            w.writerow([r["codec"], f"{r['med_2d']:.6f}", f"{r['med_1d']:.6f}",
+                        f"{r['low_2d']:.6f}", f"{r['high_2d']:.6f}",
+                        "" if r["slice_l0_gap"] is None else f"{r['slice_l0_gap']:.6f}",
+                        args.tile_n, "" if gate is None else f"{gate:.4f}"])
+
+    # One combined heatmap grid (single figure for README / supplementary).
+    save_grid(rows, out)
+
+    if gate is not None:
+        verdict = "PASS (1-D faithful)" if gate > 0.9 else "REVIEW (1-D vs 2-D disagree)"
+        print(f"\nRank-equivalence gate: Spearman(median 2-D, median 1-D) = {gate:+.3f}  -> {verdict}")
     else:
         print(f"\n(need >=3 codecs for the rank gate; got {len(rows)})")
-    print(f"-> saved L_(k,l) maps (.npy/.pdf) + radial_2d_profiles.npz in {out}")
+    print(f"-> saved summary.csv, L2_grid.png/.pdf, per-codec maps, radial_2d_profiles.npz in {out}")
 
 
 if __name__ == "__main__":
