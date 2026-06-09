@@ -17,6 +17,8 @@ Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality bu
   </a>
 </p>
 
+<p align="center"><em>DCT-basis response for the 11 codecs at their native quality settings (two levels each), hence at different bitrates — shown only to illustrate which per-frequency artifacts each codec introduces. The paper uses a matched-bitrate version (≈1.0 bpp) for a fair side-by-side comparison.</em></p>
+
 **Key finding:** Neural image codecs suppress up to **94% of their distortion** in high-frequency bands, while classical codecs (JPEG, JPEG XL, WebP) remain spectrally uniform.
 
 <p align="center">
