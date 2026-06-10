@@ -155,6 +155,17 @@ python scripts/run_benchmark.py --size 64 128 256 512 1024 --quality-sweep
 python scripts/run_directional.py --size 512 --matched-bpp
 ```
 
+### Metric consistency across distortion types
+
+The spectral leakage coupling `L̃` stays monotonic vs. PSNR under Gaussian noise, bit-depth
+quantization and JPEG re-compression — i.e. the leakage weighting does not break for
+distortions unlike typical compression artifacts.
+
+<p align="center">
+  <img src="paper/fig_distortion_consistency.png" width="75%">
+</p>
+<p align="center"><em>Metric consistency on 24 Kodak images (q=6). Left: Cheng2020-Anchor; right: MBT2018. All distortion types follow the same negative L̃(PSNR) trend. Reproduce with <code>scripts/plot_distortion_consistency.py</code>.</em></p>
+
 ### 2-D DCT basis: frequency-response tensor
 
 In the main experiments, the response **matrix** is built from the 1-D DCT basis (each
