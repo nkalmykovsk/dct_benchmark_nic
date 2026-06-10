@@ -155,6 +155,17 @@ python scripts/run_benchmark.py --size 64 128 256 512 1024 --quality-sweep
 python scripts/run_directional.py --size 512 --matched-bpp
 ```
 
+### Metric consistency across distortion types
+
+The spectral leakage coupling `L̃` stays monotonic vs. PSNR under Gaussian noise, bit-depth
+quantization and JPEG re-compression — i.e. the leakage weighting does not break for
+distortions unlike typical compression artifacts.
+
+<p align="center">
+  <img src="paper/fig_distortion_consistency.png" width="75%">
+</p>
+<p align="center"><em>Metric consistency on 24 Kodak images (q=6). Left: Cheng2020-Anchor; right: MBT2018. All distortion types follow the same negative L̃(PSNR) trend. Reproduce with <code>scripts/plot_distortion_consistency.py</code>.</em></p>
+
 ### 2-D DCT basis: frequency-response tensor
 
 In the main experiments, the response **matrix** is built from the 1-D DCT basis (each
@@ -182,6 +193,29 @@ python scripts/run_finetune.py --model cheng2020-anchor --size 128 --steps 900
 # 1024×1024 (Fig. S3, ~5 min on A100)
 python scripts/run_finetune.py --model cheng2020-anchor --size 1024 --steps 900
 ```
+
+### Natural-image reconstruction after fine-tuning
+
+Joint decoder-only fine-tuning with `L = MSE(natural patches) + λ · L_leak(DCT basis)`.
+The encoder, hyperprior and entropy model stay frozen, so the **bitrate is unchanged by
+construction**; only the decoder `g_s` is updated.
+
+```bash
+# DIV2K patches for the MSE anchor; the 3 figure images are auto-excluded from training
+python scripts/run_finetune_natural.py --train-dir data/div2k --device cuda
+```
+
+At fixed bpp this recovers high-frequency detail and attenuates the compression artifacts
+shown above. Outputs go to `results/finetune_natural_heldout/`.
+
+The same objective applied on the synthetic DCT basis at 1024×1024 reduces per-band leakage
+by up to ~90% while leaving the low band intact:
+
+<p align="center">
+  <img src="paper/finetune_1024/dct_basis_after_1024.png" width="32%">
+  <img src="paper/finetune_1024/leakage_reduction_1024.png" width="55%">
+</p>
+<p align="center"><em>Cheng2020-Anchor (1024×1024, q=6): DCT-basis reconstruction after fine-tuning (left) and per-frequency leakage L_k before vs. after (right). Reproduce with <code>scripts/run_finetune.py --size 1024</code>.</em></p>
 
 ### Table I: Kodak evaluation with spectral leakage coupling
 
@@ -212,22 +246,26 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
 <tr>
   <td align="center"><b>Original</b></td>
   <td align="center"><b>Cheng2020-Anchor (q=6)</b></td>
+  <td align="center"><b>+ Leakage fine-tuning</b></td>
 </tr>
 <tr>
-  <td><img src="paper/div2k_clic_examples_crop/0769.png" width="400"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/0769.png" width="400"></td>
+  <td><img src="paper/div2k_clic_examples_crop/0769.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0769.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_finetuned/0769.png" width="280"></td>
 </tr>
 <tr>
-  <td><img src="paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png" width="400"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/26f350af0f6ee2fb314606ebc2b56e56.png" width="400"></td>
+  <td><img src="paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/26f350af0f6ee2fb314606ebc2b56e56.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_finetuned/26f350af0f6ee2fb314606ebc2b56e56.png" width="280"></td>
 </tr>
 <tr>
-  <td><img src="paper/div2k_clic_examples_crop/0772.png" width="400"></td>
-  <td><img src="paper/div2k_clic_examples_reconstructed/0772.png" width="400"></td>
+  <td><img src="paper/div2k_clic_examples_crop/0772.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_reconstructed/0772.png" width="280"></td>
+  <td><img src="paper/div2k_clic_examples_finetuned/0772.png" width="280"></td>
 </tr>
 </table>
 </p>
-<p align="center"><em>Original images (DIV2K/CLIC, center crop 768×512 / 512×768) → Cheng2020-Anchor (q=6). Clean compression without adversarial attacks already introduces visible artifacts.</em></p>
+<p align="center"><em>Decoder-only leakage fine-tuning attenuates compression artifacts at <strong>identical bitrate</strong> (PSNR/LPIPS overlaid). Fine-tuned on <strong>DIV2K only</strong>; all three images held out (bottom row is cross-dataset CLIC). For the near-lossless bottom row the +0.002 LPIPS change is measurement noise near zero — PSNR rises and the artifact is removed. See <code>scripts/run_finetune_natural.py</code>.</em></p>
 
 ## Codec Configurations
 
