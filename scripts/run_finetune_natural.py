@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
-"""Natural-image reconstruction after Leakage-as-Loss fine-tuning (Reviewer R1.4).
+"""Natural-image reconstruction after Leakage-as-Loss fine-tuning (paper Fig. S2).
 
-Joint decoder-only fine-tuning: MSE on held-out natural patches + leakage loss on
-the DCT basis (the paper's training signal) + a low-band guard. Encoder, hyper and
-entropy stay frozen, so the bitstream — and bpp — are unchanged by construction.
-The baseline and fine-tuned decoders then reconstruct held-out natural images for a
-side-by-side column (Original | baseline | leakage-FT).
+Joint decoder-only fine-tuning: MSE on natural patches + leakage loss on the DCT
+basis (the paper's training signal) + a low-band guard. Encoder, hyperprior and
+entropy model stay frozen, so the bitstream — and bpp — are unchanged by
+construction. The baseline and fine-tuned decoders then reconstruct held-out
+natural images for a side-by-side column (Original | baseline | leakage-FT).
 
-Tuning notes (held-out eval, bpp fixed):
-    GOOD  — lambda=0.03, hf_power=3, mse=1, lr=1e-4, batch=4, steps=2000
-            → 0769 +3.4 PSNR / +4.2 HF; 0772 +0.24 PSNR; 26f3 +3.7 PSNR; spot much smaller
-    LEAK  — train without excluding eval stems 0769/0772 from DIV2K (inflated metrics)
-    FAIL  — lambda>=0.06 or hf_power>=4.5: 0772/26f3 degrade, 0769 spot can worsen
-    FAIL  — batch=8 / steps=3500: no gain on spot, 26f3 can get new artifacts
-    FAIL  — batch-skip after step~1200: training stalls, final metrics collapse
-
-Optional checkpoints (--checkpoint-every 200): save all steps, pick best 0769 HF.
+Default protocol (paper settings): lambda_freq=0.03, hf_leak_power=3,
+mse_weight=1, lr=1e-4, batch=4, steps=2000. The evaluation images are excluded
+from the training set (training on them inflates the metrics). Sensitivity:
+lambda_freq>=0.06 or hf_leak_power>=4.5 degrades held-out PSNR; larger batch or
+more steps gave no further gain.
 
 Usage:
-    python3 scripts/run_finetune_natural.py --device cuda
-    python3 scripts/run_finetune_natural.py --device cuda --extra-train-dirs \\
-        /home/nkalmykov/projects/nic-forensics/data/clic/professional
+    python3 scripts/run_finetune_natural.py --train-dir data/div2k --device cuda
     python3 scripts/run_finetune_natural.py --smoke   # numpy-only self-test
 """
 
@@ -43,7 +37,7 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 PATCH_MULT = 64  # CompressAI models need H, W divisible by this
-DEFAULT_TRAIN_DIR = "/data1/nkalmykov/div2k/images"
+DEFAULT_TRAIN_DIR = "data/div2k"
 DEFAULT_EXTRA_TRAIN_DIRS = []
 DEFAULT_EVAL_IMAGES = [
     "paper/div2k_clic_examples_crop/0769.png",
