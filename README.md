@@ -3,7 +3,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 
 > **DCT Basis Benchmarks for Neural Image Compression**  
-> Kalmykov N.I., Varetsa M.S., Dibo R., Liu Y., Oseledets I., Phan A.-H.  
+> Kalmykov N.I., Varetsa M.S., Dibo R., Du Y., Liu Y., Oseledets I., Phan A.-H.  
 
 ---
 
@@ -19,14 +19,14 @@ Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality bu
 
 <p align="center"><em>DCT-basis response for the 11 codecs at their native quality settings (two levels each), hence at different bitrates — shown only to illustrate which per-frequency artifacts each codec introduces. The paper uses a matched-bitrate version (≈1.0 bpp) for a fair side-by-side comparison.</em></p>
 
-**Key finding:** Neural image codecs suppress up to **94% of their distortion** in high-frequency bands, while classical codecs (JPEG, JPEG XL, WebP) remain spectrally uniform.
+**Key finding:** Neural image codecs concentrate up to **94% of their distortion** in the high-frequency bands they suppress, while classical codecs (JPEG, JPEG XL, WebP) remain spectrally uniform.
 
 <p align="center">
   <img src="paper/figures/fig_leakage_vs_bpp_256.png" alt="Rate-leakage comparison at 256×256" width="60%">
 </p>
 
 <p align="center">
-  <em>Rate–leakage comparison at 256×256. Traditional codecs (dashed) achieve orders-of-magnitude lower leakage across all bitrates. TCM and FTIC approach classical levels.</em>
+  <em>Rate–leakage comparison at 256×256. Traditional codecs (dashed) achieve lower median leakage across all bitrates than most NIC models (solid); TCM and FTIC approach classical levels.</em>
 </p>
 
 ---
@@ -184,17 +184,17 @@ identically to the 1-D profile (Spearman `0.95`), and `L_k` is the `l=0` slice o
 suppression pattern holds (e.g. BMSHJ2018-Factorized high-band leakage `≈ 1.0`, classical
 codecs `≈ 1e-4`). Results are saved to `results/leakage_2d/`.
 
-### Fine-tuning experiment (Fig. 2c / Fig. S3)
+### Fine-tuning experiment (Fig. 2(c))
 
 ```bash
-# 128×128 (Fig. 2c)
+# 128×128 (Fig. 2(c) in the paper)
 python scripts/run_finetune.py --model cheng2020-anchor --size 128 --steps 900
 
-# 1024×1024 (Fig. S3, ~5 min on A100)
+# 1024×1024 (repository-only extension, ~5 min on A100)
 python scripts/run_finetune.py --model cheng2020-anchor --size 1024 --steps 900
 ```
 
-### Natural-image reconstruction after fine-tuning
+### Natural-image reconstruction after fine-tuning (Fig. S2)
 
 Joint decoder-only fine-tuning with `L = MSE(natural patches) + λ · L_leak(DCT basis)`.
 The encoder, hyperprior and entropy model stay frozen, so the **bitrate is unchanged by
@@ -207,6 +207,8 @@ python scripts/run_finetune_natural.py --train-dir data/div2k --device cuda
 
 At fixed bpp this recovers high-frequency detail and attenuates the compression artifacts
 shown above. Outputs go to `results/finetune_natural_heldout/`.
+The fine-tuned decoder checkpoint is distributed as a GitHub Release asset; see
+[`models/README.md`](models/README.md).
 
 The same objective applied on the synthetic DCT basis at 1024×1024 reduces per-band leakage
 by up to ~90% while leaving the low band intact:
@@ -217,18 +219,26 @@ by up to ~90% while leaving the low band intact:
 </p>
 <p align="center"><em>Cheng2020-Anchor (1024×1024, q=6): DCT-basis reconstruction after fine-tuning (left) and per-frequency leakage L_k before vs. after (right). Reproduce with <code>scripts/run_finetune.py --size 1024</code>.</em></p>
 
-### Table I: Kodak evaluation with spectral leakage coupling
+### Table I: spectral leakage coupling on Kodak, CLIC, and DIV2K
+
+Table I pools **115 images** (24 Kodak + 41 CLIC Pro validation + 50 DIV2K).
+NICs run at fixed quality (q=6); classical codecs are rate-matched to ≈0.9 bpp
+per dataset; CLIC/DIV2K images are center-cropped to ≤768 px.
 
 ```bash
-# Download Kodak images first (24 images, 768×512 / 512×768)
-mkdir -p data/kodak
-# ... download from http://r0k.us/graphics/kodak/
+# place the datasets under data/ first (Kodak: http://r0k.us/graphics/kodak/)
+python scripts/run_kodak_eval.py --data-dir data/kodak
+python scripts/run_kodak_eval.py --data-dir data/clic  --dataset-name clic  --no-distortions
+python scripts/run_kodak_eval.py --data-dir data/div2k --dataset-name div2k --max-images 50 --no-distortions
 
-# Run evaluation (requires GPU, ~1h for all models)
-python scripts/run_kodak_eval.py --kodak-dir data/kodak
+# pool the per-dataset CSVs into the final table (+ NIC-only Spearman)
+python scripts/aggregate_r15_table.py \
+    results/kodak_eval/kodak_per_image.csv \
+    results/kodak_eval/clic_per_image.csv \
+    results/kodak_eval/div2k_per_image.csv
 
 # Quick test (1 model, 1 image)
-python scripts/run_kodak_eval.py --kodak-dir data/kodak --single
+python scripts/run_kodak_eval.py --data-dir data/kodak --single
 ```
 
 ### Generate all paper figures
@@ -277,7 +287,7 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
 | JPEG / WebP | quality ∈ {20, 40, 55, 70, 85, 95} |
 | JPEG XL | distance ∈ {4.0, 2.0, 1.0, 0.6, 0.3, 0.1} |
 
-Table I uses ≈0.8–1.0 bpp, DCT size 512×512, 24 Kodak images.
+Table I: 115 images (24 Kodak + 41 CLIC + 50 DIV2K), NICs at q=6, classical codecs matched to ≈0.9 bpp per dataset, DCT size 512×512.
 
 ---
 
@@ -292,25 +302,34 @@ dct_benchmark_nic/
 │   └── loaders.py         # Model loaders (CompressAI, TCM, FTIC, classical)
 ├── scripts/
 │   ├── run_benchmark.py       # Full benchmark → results/leakage_vs_bpp/
-│   ├── run_kodak_eval.py      # Table I: Kodak + L̃ coupling → results/kodak_eval/
+│   ├── run_kodak_eval.py      # Table I: natural-image eval + L̃ coupling → results/kodak_eval/
+│   ├── aggregate_r15_table.py # Table I: pool per-dataset CSVs, Spearman, LaTeX rows
 │   ├── run_directional.py     # Directional leakage → results/directional/
-│   ├── run_finetune.py        # Fine-tuning demo → results/finetune/
-│   ├── plot_fig3_grid.py      # Fig. 3: DCT response grid (11 codecs × 2 quality)
-│   ├── plot_fig4b_artifact.py # Fig. 4b: 1024×1024 reconstruction artifact
-│   └── plot_distortion_consistency.py  # Fig. S2: L̃ consistency
+│   ├── run_2d_leakage.py      # 2-D basis: frequency-response tensor → results/leakage_2d/
+│   ├── run_finetune.py        # Basis-only fine-tuning (Fig. 2(c)) → results/finetune/
+│   ├── run_finetune_natural.py    # Natural-image fine-tuning (Fig. S2)
+│   ├── make_ft_natural_figure.py  # Render Fig. S2 from saved outputs
+│   ├── plot_fig3_grid.py      # DCT response grid at native quality (figure above)
+│   ├── plot_fig3_matched_bpp.py   # Fig. 3: response grid at matched ≈1.0 bpp
+│   ├── plot_fig4b_artifact.py # Fig. 4(b): 1024×1024 reconstruction artifact
+│   ├── plot_directional_paper.py  # Fig. S1: directional leakage plot
+│   └── plot_distortion_consistency.py  # Distortion-consistency figure
 ├── notebooks/
 │   ├── 01_demo.ipynb      # Interactive demo and exploration
 │   └── 02_paper_figures.ipynb  # Reproduce all paper figures
+├── models/                # Fine-tuned checkpoints (GitHub Release assets)
 ├── results/               # Pre-computed CSVs
 │   ├── all_metrics_summary.csv  # Full benchmark: all codecs × sizes × q
 │   ├── leakage_vs_bpp/    # Rate–leakage scan data per size
+│   ├── leakage_2d/        # 2-D basis leakage maps + summary
 │   ├── directional/       # Directional leakage data
-│   ├── kodak_eval/        # Table I: Kodak spectral coupling + perceptual metrics
+│   ├── kodak_eval/        # Table I: per-image CSVs (Kodak, CLIC, DIV2K)
 │   └── finetune/          # Fine-tuning results
 ├── paper/figures/         # Final paper figures (PDF)
 ├── third_party/
 │   ├── LIC_TCM/           # TCM model code + checkpoints
 │   └── ICLR2024-FTIC/     # FTIC model code
+├── setup.py
 └── requirements.txt
 ```
 
@@ -318,7 +337,7 @@ dct_benchmark_nic/
 
 ## Evaluated Codecs
 
-| Model | Type | Params |
+| Model | Type | Settings |
 |-------|------|--------|
 | BMSHJ2018-Factorized | NIC | CompressAI q=1–6 |
 | BMSHJ2018-Hyperprior | NIC | CompressAI q=1–6 |
@@ -339,10 +358,9 @@ dct_benchmark_nic/
 ```bibtex
 @article{kalmykov2026dct,
   title={DCT Basis Benchmarks for Neural Image Compression},
-  author={Kalmykov, Nikolay I. and Varetsa, Maria S. and Dibo, Razan and Liu, Yipeng and Oseledets, Ivan and Phan, Anh-Huy},
-  journal={},
-  year={},
-  publisher={}
+  author={Kalmykov, Nikolay I. and Varetsa, Maria S. and Dibo, Razan and Du, Yujun and Liu, Yipeng and Oseledets, Ivan and Phan, Anh-Huy},
+  year={2026},
+  note={Submitted to IEEE Signal Processing Letters}
 }
 ```
 
@@ -353,4 +371,4 @@ dct_benchmark_nic/
 - [CompressAI](https://github.com/InterDigitalInc/CompressAI) — neural codec implementations
 - [LIC_TCM](https://github.com/jmliu206/LIC_TCM) — TCM model
 - [ICLR2024-FTIC](https://github.com/xyq7/ICLR2024-FTIC) — FTIC model
-- Kodak dataset — [USC SIPI](http://sipi.usc.edu/database/database.php?volume=misc)
+- [Kodak](http://r0k.us/graphics/kodak/), [CLIC](https://clic2025.compression.cc), and [DIV2K](https://data.vision.ee.ethz.ch/cvl/DIV2K/) — evaluation datasets
