@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Evaluate spectral leakage coupling L̃(X, X̂) on the Kodak dataset (Table I).
+"""Evaluate spectral leakage coupling L̃(X, X̂) on natural images (Table I).
 
-Compresses each Kodak image with each codec at the highest quality, computes
-PSNR, MS-SSIM, LPIPS, and the spectral leakage coupling L̃ (Eq. 6 in paper).
+Compresses each image with each codec (NICs at fixed quality q=6, classical
+codecs rate-matched to --target-bpp), computes PSNR, MS-SSIM, LPIPS, and the
+spectral leakage coupling L̃.
 
 Paper settings (Table I):
-    24 Kodak images, q=6 (highest quality), DCT size 512×512, N_b=512 bins
-    Additional distortions: Gaussian noise (σ∈[0.01,0.20]), bit-depth
-    quantization (2–6 bits), JPEG re-compression (q∈[10–70])
+    115 images = 24 Kodak + 41 CLIC Pro + 50 DIV2K; DCT size 512×512,
+    N_b=512 bins; pool the per-dataset CSVs with scripts/aggregate_r15_table.py.
+    Additional distortions (Kodak only): Gaussian noise (σ∈[0.01,0.20]),
+    bit-depth quantization (2–6 bits), JPEG re-compression (q∈[10–70])
 
 Usage:
     python scripts/run_kodak_eval.py --data-dir data/kodak
-    # generality check (R1.5) on other datasets, leakage coupling only:
     python scripts/run_kodak_eval.py --data-dir data/clic  --dataset-name clic  --no-distortions
     python scripts/run_kodak_eval.py --data-dir data/div2k --dataset-name div2k --no-distortions
     python scripts/run_kodak_eval.py --data-dir data/kodak --single  # quick test
