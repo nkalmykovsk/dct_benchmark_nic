@@ -245,7 +245,7 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
 </tr>
 </table>
 </p>
-<p align="center"><em>Decoder-only leakage fine-tuning attenuates compression artifacts at <strong>identical bitrate</strong> (PSNR/LPIPS overlaid). Fine-tuned on <strong>DIV2K only</strong>; all three images held out (bottom row is cross-dataset CLIC). For the near-lossless bottom row (LPIPS ≈ 0.02) the +0.002 LPIPS change is measurement noise near zero — PSNR rises and the artifact is removed. See <code>scripts/run_finetune_natural.py</code>.</em></p>
+<p align="center"><em>Decoder-only leakage fine-tuning attenuates compression artifacts at <strong>identical bitrate</strong> (PSNR/LPIPS overlaid). Fine-tuned on <strong>DIV2K only</strong>; all three images held out (bottom row is cross-dataset CLIC). For the near-lossless bottom row the +0.002 LPIPS change is measurement noise near zero — PSNR rises and the artifact is removed. See <code>scripts/run_finetune_natural.py</code>.</em></p>
 
 ## Codec Configurations
 
