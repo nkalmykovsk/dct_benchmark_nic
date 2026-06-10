@@ -197,6 +197,15 @@ python scripts/run_finetune_natural.py --train-dir data/div2k --device cuda
 At fixed bpp this recovers high-frequency detail and attenuates the compression artifacts
 shown above. Outputs go to `results/finetune_natural_heldout/`.
 
+The same objective applied on the synthetic DCT basis at 1024×1024 reduces per-band leakage
+by up to ~90% while leaving the low band intact:
+
+<p align="center">
+  <img src="paper/finetune_1024/dct_basis_after_1024.png" width="32%">
+  <img src="paper/finetune_1024/leakage_reduction_1024.png" width="55%">
+</p>
+<p align="center"><em>Cheng2020-Anchor (1024×1024, q=6): DCT-basis reconstruction after fine-tuning (left) and per-frequency leakage L_k before vs. after (right). Reproduce with <code>scripts/run_finetune.py --size 1024</code>.</em></p>
+
 ### Table I: Kodak evaluation with spectral leakage coupling
 
 ```bash
