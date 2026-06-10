@@ -249,7 +249,7 @@ jupyter nbconvert --to notebook --execute notebooks/02_paper_figures.ipynb
 </tr>
 </table>
 </p>
-<p align="center"><em>Original images (center crop 768×512 / 512×768) → Cheng2020-Anchor (q=6) → after decoder-only leakage fine-tuning. Clean compression already introduces visible artifacts; leakage-as-loss fine-tuning attenuates them at <strong>identical bitrate</strong> (PSNR 0769 18.2→21.6 dB, 26f3 27.0→30.6 dB; same bpp). The decoder is fine-tuned on <strong>DIV2K only</strong> with the two DIV2K images (0769, 0772) excluded; the third (CLIC) is cross-dataset — all three are held out. See <code>scripts/run_finetune_natural.py</code>.</em></p>
+<p align="center"><em>Decoder-only leakage fine-tuning attenuates compression artifacts at <strong>identical bitrate</strong> (PSNR/LPIPS overlaid). Fine-tuned on <strong>DIV2K only</strong>; all three images held out (bottom row is cross-dataset CLIC). See <code>scripts/run_finetune_natural.py</code>.</em></p>
 
 ## Codec Configurations
 
