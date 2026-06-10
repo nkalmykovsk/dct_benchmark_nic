@@ -185,21 +185,17 @@ python scripts/run_finetune.py --model cheng2020-anchor --size 1024 --steps 900
 
 ### Natural-image reconstruction after fine-tuning
 
-Joint decoder-only fine-tuning (MSE on held-out natural patches + leakage loss on the
-DCT basis). The encoder, hyperprior and entropy model stay frozen, so the **bitrate is
-unchanged by construction**; only the decoder `g_s` is updated.
+Joint decoder-only fine-tuning with `L = MSE(natural patches) + λ · L_leak(DCT basis)`.
+The encoder, hyperprior and entropy model stay frozen, so the **bitrate is unchanged by
+construction**; only the decoder `g_s` is updated.
 
 ```bash
 # DIV2K patches for the MSE anchor; the 3 figure images are auto-excluded from training
-python scripts/run_finetune_natural.py --train-dir data/div2k --device cuda \
-    --eval-images paper/div2k_clic_examples_crop/0769.png \
-                  paper/div2k_clic_examples_crop/0772.png \
-                  paper/div2k_clic_examples_crop/26f350af0f6ee2fb314606ebc2b56e56.png
+python scripts/run_finetune_natural.py --train-dir data/div2k --device cuda
 ```
 
-At fixed bpp this recovers high-frequency detail and attenuates the compression
-artifacts above (PSNR +3.4/+0.2/+3.7 dB; HF-PSNR +4.2/−0.1/+1.0 dB across the three
-held-out images). Outputs go to `results/finetune_natural_heldout/`.
+At fixed bpp this recovers high-frequency detail and attenuates the compression artifacts
+shown above. Outputs go to `results/finetune_natural_heldout/`.
 
 ### Table I: Kodak evaluation with spectral leakage coupling
 
