@@ -33,3 +33,8 @@ kodak/
 
 # Logs
 *.log
+
+# large fine-tuned checkpoints — distributed via GitHub Releases
+*.pth
+*.pth.tar
+!models/README.md
