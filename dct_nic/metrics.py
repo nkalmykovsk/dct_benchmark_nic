@@ -3,7 +3,8 @@
 All functions operate on numpy arrays and are model-agnostic.
 
 Paper reference:
-    Kalmykov et al., "DCT Basis Benchmarks for Neural Image Compression"
+    Kalmykov et al., "Benchmarking Neural Image Compression with
+    DCT-Based Spectral Diagnostics"
 """
 
 from __future__ import annotations

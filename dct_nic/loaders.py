@@ -1,4 +1,5 @@
 """Model loading utilities for NIC frequency response evaluation."""
+from __future__ import annotations
 
 import os
 import sys
@@ -301,6 +302,72 @@ def load_ftic_model(quality: int, device: torch.device, base_dir: str):
     return model
 
 
+_THIRD_PARTY = Path(__file__).resolve().parents[1] / "third_party"
+HIFIC_REPO = os.environ.get(
+    "DCT_NIC_HIFIC_REPO",
+    str(_THIRD_PARTY / "high-fidelity-generative-compression"),
+)
+_HIFIC_CKPT_DIR = os.environ.get(
+    "DCT_NIC_HIFIC_CKPT_DIR", str(_THIRD_PARTY / "hific_ckpts")
+)
+HIFIC_CKPTS = {
+    "hific-low": os.path.join(_HIFIC_CKPT_DIR, "hific_low.pt"),
+    "hific-med": os.path.join(_HIFIC_CKPT_DIR, "hific_med.pt"),
+    "hific-hi": os.path.join(_HIFIC_CKPT_DIR, "hific_hi.pt"),
+}
+
+
+class HiFiCModel:
+    """HiFiC (Justin-Tan port) wrapped to the benchmark interface:
+    callable x[1,3,H,W] in [0,1] -> {"x_hat": [0,1], "bpp": float}.
+
+    Uses compression_forward (soft path); verified bit-identical to the
+    compress/decompress entropy-coding path on natural images, and its
+    q_bpp equals the coder's theoretical bpp (consistent with the
+    likelihood-based bpp used for the other NICs). Checkpoints store their
+    own `normalize_input_image` flag ([0,1] vs [-1,1] I/O), which is
+    honored per checkpoint.
+    """
+
+    def __init__(self, name: str, device: torch.device,
+                 repo: str = HIFIC_REPO):
+        import os as _os
+        import sys as _sys
+        import logging as _logging
+        if repo not in _sys.path:
+            _sys.path.insert(0, repo)
+        cwd = _os.getcwd()
+        _os.chdir(repo)  # repo loads LPIPS weights via relative paths
+        try:
+            from src.helpers import utils as _hutils
+            from default_config import ModelModes as _MM
+            _log = _logging.getLogger("hific_loader")
+            _log.addHandler(_logging.NullHandler())
+            self.args, self.model, _ = _hutils.load_model(
+                HIFIC_CKPTS[name], _log, device, model_mode=_MM.EVALUATION,
+                current_args_d=None, prediction=True, strict=False,
+                silent=True)
+        finally:
+            _os.chdir(cwd)
+        self.model.eval()
+        self.device = device
+        self.norm = bool(getattr(self.args, "normalize_input_image", True))
+        for prm in self.model.parameters():
+            prm.requires_grad = False
+
+    def eval(self):
+        return self
+
+    @torch.no_grad()
+    def __call__(self, x: torch.Tensor) -> dict:
+        xin = 2.0 * x - 1.0 if self.norm else x
+        inter, _ = self.model.compression_forward(xin.to(self.device))
+        rec = inter.reconstruction
+        if self.norm:
+            rec = (rec + 1.0) / 2.0
+        return {"x_hat": rec.clamp(0, 1), "bpp": float(inter.q_bpp)}
+
+
 def load_model(
     model_name: str,
     quality: int,
@@ -342,6 +409,8 @@ def load_model(
         if base_dir is None:
             base_dir = str(Path(__file__).resolve().parents[1] / "third_party")
         return load_ftic_model(quality, device, base_dir)
+    elif name in HIFIC_CKPTS:
+        return HiFiCModel(name, device)
     else:
         return load_compressai_model(model_name, quality, device)
 
