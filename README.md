@@ -1,8 +1,8 @@
-# DCT Basis Benchmarks for Neural Image Compression
+# Benchmarking Neural Image Compression with DCT-Based Spectral Diagnostics
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 
-> **DCT Basis Benchmarks for Neural Image Compression**  
+> **Benchmarking Neural Image Compression with DCT-Based Spectral Diagnostics**  
 > Kalmykov N.I., Varetsa M.S., Dibo R., Du Y., Liu Y., Oseledets I., Phan A.-H.  
 
 ---
@@ -12,14 +12,17 @@
 Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality but hide *which frequency components* a codec distorts. By compressing an $n \times n$ DCT basis matrix, where each spatial position encodes a unique frequency pair, we obtain a **per-frequency leakage profile** that exposes systematic biases invisible to pixel-level metrics.
 
 <p align="center">
-  <a href="paper/figures/fig3_dct_response_grid.png">
-    <img src="paper/figures/fig3_dct_response_grid.png" alt="DCT grid response for 11 codecs" width="1200" style="max-width: 100%; height: auto;">
+  <a href="paper/figures/fig_grid_matched_bpp.png">
+    <img src="paper/figures/fig_grid_matched_bpp.png" alt="DCT grid response for 11 codecs plus HiFiC at nearest 1.0 bpp" width="1200" style="max-width: 100%; height: auto;">
   </a>
 </p>
 
-<p align="center"><em>DCT-basis response for the 11 codecs at their native quality settings (two levels each), hence at different bitrates — shown only to illustrate which per-frequency artifacts each codec introduces. The paper uses a matched-bitrate version (≈1.0 bpp) for a fair side-by-side comparison.</em></p>
+<p align="center"><em>DCT-basis response of eleven codecs at their available setting nearest 1.0 bpp, plus the GAN-based HiFiC at its highest fixed rate (bottom-right). Under each panel: median leakage L<sub>k</sub>, its low/high-band values, and the measured bitrate.</em></p>
 
-**Key finding:** Neural image codecs concentrate up to **94% of their distortion** in the high-frequency bands they suppress, while classical codecs (JPEG, JPEG XL, WebP) remain spectrally uniform.
+**Key findings:**
+- At operating points near 1 bpp, the BMSHJ/MBT/Cheng2020 families leave **80–97% of their reconstructed high-band energy off the target frequency** (target gains 0.02–0.23), while classical codecs and the recent TCM/FTIC stay in a low-leakage regime.
+- Released **Cheng2020-Anchor** checkpoints (q=4–6) **diverge on isolated single-frequency inputs**, with unclamped errors up to 1.9×10¹¹ — invisible to rate–distortion metrics.
+- Decoder-only leakage fine-tuning removes **94.7–99.8% of basis leakage at a fixed bitstream** for at most 0.29 dB Kodak PSNR.
 
 <p align="center">
   <img src="paper/figures/fig_leakage_vs_bpp_256.png" alt="Rate-leakage comparison at 256×256" width="60%">
@@ -28,6 +31,14 @@ Standard metrics (PSNR, MS-SSIM) summarize **overall** reconstruction quality bu
 <p align="center">
   <em>Rate–leakage comparison at 256×256. Traditional codecs (dashed) achieve lower median leakage across all bitrates than most NIC models (solid); TCM and FTIC approach classical levels.</em>
 </p>
+
+### Checkpoint instability exposed by single-frequency probes
+
+<p align="center">
+  <img src="paper/figures/fig_anchor_instability.png" alt="Cheng2020-Anchor released-checkpoint instability" width="70%">
+</p>
+
+<p align="center"><em>Unclamped single-frequency error for the six released Cheng2020-Anchor checkpoints. The q=1–3 models (N=128) stay bounded, while the released q=4–6 models (N=192) diverge by up to eleven orders of magnitude at isolated frequencies. See <code>scripts/extended_v3/s23_instability_allq.py</code> and <code>s18_x1_instability.py</code>.</em></p>
 
 ---
 
@@ -47,6 +58,7 @@ Response matrix  R[i,k] = |DCT(D̂[:,k])ᵢ|² / Σⱼ|DCT(D̂[:,k])ⱼ|²
      ▼
 Metrics per frequency k:
   L_k  = 1 − R[k,k]          Leakage       ↓ better
+  g_k  = DCT(D̂[:,k])ₖ        Target gain   ↑ better (signed target coefficient)
   ODR_k = tanh(Σᵢ≠ₖ R[i,k] / 2R[k,k])  Off-diag ratio ↓ better
   |Δ_k|  = |centroid(k) − k| / norm     Centroid shift ↓ better
   σ_k    = spread of response column k  Spread         ↓ better
@@ -89,6 +101,12 @@ git clone https://github.com/jmliu206/LIC_TCM.git third_party/LIC_TCM
 git clone https://github.com/xyq7/ICLR2024-FTIC.git third_party/ICLR2024-FTIC
 # Download checkpoints into third_party/ICLR2024-FTIC/checkpoints/
 #   ckpt_mse_0018.pth ... ckpt_mse_0483.pth
+
+# HiFiC (perceptual anchor; PyTorch port by Justin-Tan)
+git clone https://github.com/Justin-Tan/high-fidelity-generative-compression.git \
+    third_party/high-fidelity-generative-compression
+# Put hific_low.pt / hific_med.pt / hific_hi.pt into third_party/hific_ckpts/
+# (override locations with DCT_NIC_HIFIC_REPO / DCT_NIC_HIFIC_CKPT_DIR)
 ```
 
 > **Note:** If you only need CompressAI models and classical codecs, third_party setup is optional.
@@ -141,14 +159,14 @@ jupyter notebook notebooks/01_demo.ipynb
 # Single quality (q=6), DCT size 256
 python scripts/run_benchmark.py --size 256
 
-# Rate–leakage sweep (all quality levels) — generates Fig. 5 data
+# Rate–leakage sweep (all quality levels) — generates Fig. 4 data
 python scripts/run_benchmark.py --size 256 --quality-sweep
 
 # All sizes from the paper
 python scripts/run_benchmark.py --size 64 128 256 512 1024 --quality-sweep
 ```
 
-### Directional leakage (Fig. S1)
+### Directional leakage (repository extension)
 
 ```bash
 # Matched bitrate ≈ 2.5 bpp, 512×512 (paper settings)
@@ -159,12 +177,8 @@ python scripts/run_directional.py --size 512 --matched-bpp
 
 The spectral leakage coupling `L̃` stays monotonic vs. PSNR under Gaussian noise, bit-depth
 quantization and JPEG re-compression — i.e. the leakage weighting does not break for
-distortions unlike typical compression artifacts.
-
-<p align="center">
-  <img src="paper/fig_distortion_consistency.png" width="75%">
-</p>
-<p align="center"><em>Metric consistency on 24 Kodak images (q=6). Left: Cheng2020-Anchor; right: MBT2018. All distortion types follow the same negative L̃(PSNR) trend. Reproduce with <code>scripts/plot_distortion_consistency.py</code>.</em></p>
+distortions unlike typical compression artifacts. Reproduce with
+`scripts/plot_distortion_consistency.py`.
 
 ### 2-D DCT basis: frequency-response tensor
 
@@ -184,17 +198,17 @@ identically to the 1-D profile (Spearman `0.95`), and `L_k` is the `l=0` slice o
 suppression pattern holds (e.g. BMSHJ2018-Factorized high-band leakage `≈ 1.0`, classical
 codecs `≈ 1e-4`). Results are saved to `results/leakage_2d/`.
 
-### Fine-tuning experiment (Fig. 2(c))
+### Fine-tuning experiment (Fig. 3(c))
 
 ```bash
-# 128×128 (Fig. 2(c) in the paper)
+# 128×128 (Fig. 3(c) in the paper)
 python scripts/run_finetune.py --model cheng2020-anchor --size 128 --steps 900
 
 # 1024×1024 (repository-only extension, ~5 min on A100)
 python scripts/run_finetune.py --model cheng2020-anchor --size 1024 --steps 900
 ```
 
-### Natural-image reconstruction after fine-tuning (Fig. S2)
+### Natural-image reconstruction after fine-tuning (paper Fig. 7, Suppl. Figs. S4–S5)
 
 Joint decoder-only fine-tuning with `L = MSE(natural patches) + λ · L_leak(DCT basis)`.
 The encoder, hyperprior and entropy model stay frozen, so the **bitrate is unchanged by
@@ -309,11 +323,12 @@ dct_benchmark_nic/
 │   ├── run_finetune.py        # Basis-only fine-tuning (Fig. 2(c)) → results/finetune/
 │   ├── run_finetune_natural.py    # Natural-image fine-tuning (Fig. S2)
 │   ├── make_ft_natural_figure.py  # Render Fig. S2 from saved outputs
-│   ├── plot_fig3_grid.py      # DCT response grid at native quality (figure above)
-│   ├── plot_fig3_matched_bpp.py   # Fig. 3: response grid at matched ≈1.0 bpp
-│   ├── plot_fig4b_artifact.py # Fig. 4(b): 1024×1024 reconstruction artifact
-│   ├── plot_directional_paper.py  # Fig. S1: directional leakage plot
-│   └── plot_distortion_consistency.py  # Distortion-consistency figure
+│   ├── plot_fig3_grid.py      # DCT response grid at native quality
+│   ├── plot_fig3_matched_bpp.py   # Fig. 2: response grid at matched ≈1.0 bpp (figure above)
+│   ├── plot_fig4b_artifact.py # Fig. 6(b): 1024×1024 reconstruction artifact
+│   ├── plot_directional_paper.py  # Directional leakage plot (repo extension)
+│   ├── plot_distortion_consistency.py  # Distortion-consistency check
+│   └── extended_v3/           # Scripts for the extended (journal) experiments
 ├── notebooks/
 │   ├── 01_demo.ipynb      # Interactive demo and exploration
 │   └── 02_paper_figures.ipynb  # Reproduce all paper figures
@@ -347,6 +362,7 @@ dct_benchmark_nic/
 | Cheng2020-Attention | NIC | CompressAI q=1–6 |
 | TCM | NIC | λ∈{0.0025,0.05}, p=64,128 |
 | FTIC | NIC | q=1–6 (n≥256) |
+| HiFiC | NIC (GAN, perceptual anchor) | released low/med/hi checkpoints |
 | JPEG | Classical | quality 20–95 |
 | JPEG XL | Classical | distance 0.1–4.0 |
 | WebP | Classical | quality 20–95 |
@@ -357,10 +373,10 @@ dct_benchmark_nic/
 
 ```bibtex
 @article{kalmykov2026dct,
-  title={DCT Basis Benchmarks for Neural Image Compression},
+  title={Benchmarking Neural Image Compression with {DCT}-Based Spectral Diagnostics},
   author={Kalmykov, Nikolay I. and Varetsa, Maria S. and Dibo, Razan and Du, Yujun and Liu, Yipeng and Oseledets, Ivan and Phan, Anh-Huy},
   year={2026},
-  note={Submitted to IEEE Signal Processing Letters}
+  note={Submitted to Neurocomputing}
 }
 ```
 
@@ -371,4 +387,5 @@ dct_benchmark_nic/
 - [CompressAI](https://github.com/InterDigitalInc/CompressAI) — neural codec implementations
 - [LIC_TCM](https://github.com/jmliu206/LIC_TCM) — TCM model
 - [ICLR2024-FTIC](https://github.com/xyq7/ICLR2024-FTIC) — FTIC model
-- [Kodak](http://r0k.us/graphics/kodak/), [CLIC](https://clic2025.compression.cc), and [DIV2K](https://data.vision.ee.ethz.ch/cvl/DIV2K/) — evaluation datasets
+- [high-fidelity-generative-compression](https://github.com/Justin-Tan/high-fidelity-generative-compression) — HiFiC PyTorch port
+- [Kodak](http://r0k.us/graphics/kodak/), [CLIC](https://compression.cc), and [DIV2K](https://data.vision.ee.ethz.ch/cvl/DIV2K/) — evaluation datasets
